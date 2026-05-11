@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0f10" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Drum Tuner</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div>
+            <h1>Drum Tuner</h1>
+            <p id="secureState">Ready</p>
+          </div>
+        </div>
+        <button class="primary-action" id="micButton" type="button">
+          <span class="mic-dot" aria-hidden="true"></span>
+          <span id="micButtonText">Start mic</span>
+        </button>
+      </header>
+
+      <main class="workspace">
+        <section class="tuner-panel" aria-label="Drum tuner">
+          <div class="segmented" role="tablist" aria-label="Tuning mode">
+            <button class="segment active" type="button" role="tab" aria-selected="true" data-mode="pitch">Pitch</button>
+            <button class="segment" type="button" role="tab" aria-selected="false" data-mode="lugs">Lugs</button>
+            <button class="segment" type="button" role="tab" aria-selected="false" data-mode="heads">Heads</button>
+          </div>
+
+          <div class="meter-wrap">
+            <canvas id="meterCanvas" width="760" height="760" aria-label="Tuning meter"></canvas>
+            <div class="readout" aria-live="polite">
+              <span class="readout-label" id="modeLabel">Pitch tuning</span>
+              <strong id="frequencyReadout">-- Hz</strong>
+              <span id="noteReadout">Tap a drum</span>
+            </div>
+          </div>
+
+          <div class="tuning-strip" aria-label="Cents from target">
+            <span>-50</span>
+            <div class="strip-track">
+              <div class="sweet-zone"></div>
+              <div class="strip-pointer" id="stripPointer"></div>
+            </div>
+            <span>+50</span>
+          </div>
+
+          <div class="metric-grid">
+            <div>
+              <span>Target</span>
+              <strong id="targetReadout">123.5 Hz</strong>
+            </div>
+            <div>
+              <span>Offset</span>
+              <strong id="centsReadout">-- cents</strong>
+            </div>
+            <div>
+              <span>Signal</span>
+              <strong id="signalReadout">Idle</strong>
+            </div>
+            <div>
+              <span>Confidence</span>
+              <strong id="confidenceReadout">--%</strong>
+            </div>
+            <div>
+              <span>Takes</span>
+              <strong id="takeReadout">0/3</strong>
+            </div>
+          </div>
+        </section>
+
+        <aside class="control-panel" aria-label="Tuning controls">
+          <div class="panel-heading">
+            <h2>Target</h2>
+            <span id="presetName">12 in rack tom</span>
+          </div>
+
+          <label class="field">
+            <span>Drum preset</span>
+            <select id="presetSelect">
+              <option value="kick22">22 in kick - 60 Hz</option>
+              <option value="kick20">20 in kick - 72 Hz</option>
+              <option value="floor16">16 in floor tom - 87.3 Hz</option>
+              <option value="floor14">14 in floor tom - 98 Hz</option>
+              <option value="rack13">13 in rack tom - 110 Hz</option>
+              <option value="rack12" selected>12 in rack tom - 123.5 Hz</option>
+              <option value="rack10">10 in rack tom - 147 Hz</option>
+              <option value="snare14">14 in snare - 196 Hz</option>
+              <option value="snare14High">14 in snare high - 220 Hz</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+
+          <label class="field inline-field">
+            <span>Target Hz</span>
+            <input id="targetInput" type="number" min="35" max="450" step="0.1" value="123.5" inputmode="decimal" />
+          </label>
+
+          <label class="field">
+            <span>Search window</span>
+            <input id="rangeInput" type="range" min="0.5" max="2.5" step="0.1" value="1.4" />
+          </label>
+
+          <label class="toggle">
+            <input id="targetFilter" type="checkbox" checked />
+            <span>Target filter</span>
+          </label>
+
+          <label class="field">
+            <span>Hit sensitivity</span>
+            <input id="sensitivityInput" type="range" min="0.01" max="0.18" step="0.005" value="0.045" />
+          </label>
+
+          <label class="field">
+            <span>Hits to average</span>
+            <select id="takesSelect">
+              <option value="1">1 hit</option>
+              <option value="2">2 hits</option>
+              <option value="3" selected>3 hits</option>
+              <option value="4">4 hits</option>
+              <option value="5">5 hits</option>
+            </select>
+          </label>
+
+          <button id="resetTakesButton" class="secondary-action" type="button">Reset takes</button>
+
+          <div class="panel-heading compact">
+            <h2>Lugs</h2>
+            <span id="lugAverage">-- Hz avg</span>
+          </div>
+
+          <label class="field">
+            <span>Lug count</span>
+            <select id="lugCountSelect">
+              <option value="6">6 lugs</option>
+              <option value="8" selected>8 lugs</option>
+              <option value="10">10 lugs</option>
+            </select>
+          </label>
+
+          <div class="field">
+            <span>Lug order</span>
+            <div class="pattern-toggle" role="group" aria-label="Lug order">
+              <button class="pattern-option active" type="button" data-lug-pattern="clockwise" aria-pressed="true">
+                Clockwise
+              </button>
+              <button class="pattern-option" type="button" data-lug-pattern="star" aria-pressed="false">
+                Star
+              </button>
+            </div>
+          </div>
+
+          <div class="button-row">
+            <button id="captureLugButton" class="secondary-action" type="button">Arm lug 1</button>
+            <button id="clearLugsButton" class="icon-action" type="button" aria-label="Clear lug readings">Clear</button>
+          </div>
+
+          <div class="panel-heading compact">
+            <h2>Heads</h2>
+            <span id="headRatioReadout">-- ratio</span>
+          </div>
+
+          <label class="field">
+            <span>Head side</span>
+            <select id="headSideSelect">
+              <option value="batter" selected>Batter</option>
+              <option value="resonant">Resonant</option>
+            </select>
+          </label>
+
+          <button id="resetHeadsButton" class="secondary-action" type="button">Reset heads</button>
+        </aside>
+
+        <section class="analysis-panel" aria-label="Audio analysis">
+          <div class="panel-heading">
+            <h2>Signal</h2>
+            <span id="analysisStatus">Mic off</span>
+          </div>
+          <div class="scope-grid">
+            <canvas id="waveCanvas" width="720" height="220" aria-label="Waveform"></canvas>
+            <canvas id="spectrumCanvas" width="720" height="220" aria-label="Frequency spectrum"></canvas>
+          </div>
+          <div class="history-list" id="historyList" aria-label="Recent hits"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>
