@@ -13,6 +13,20 @@ const presets = {
 
 const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
+const colors = {
+  bgBase: "#0a0a0b",
+  surface: "#111113",
+  elevated: "#1a1a1e",
+  text: "#f2f2f3",
+  secondary: "#8b8b96",
+  accent: "#f97316",
+  accentSoft: "rgba(249, 115, 22, 0.34)",
+  success: "#22c55e",
+  warning: "#eab308",
+  error: "#ef4444",
+  border: "rgba(255, 255, 255, 0.12)",
+};
+
 const el = {
   micButton: document.querySelector("#micButton"),
   micButtonText: document.querySelector("#micButtonText"),
@@ -1141,15 +1155,15 @@ function drawMeter() {
   ctx.clearRect(0, 0, width, height);
 
   const shellGradient = ctx.createRadialGradient(center, center, width * 0.1, center, center, width * 0.46);
-  shellGradient.addColorStop(0, "#20282a");
-  shellGradient.addColorStop(0.55, "#111718");
-  shellGradient.addColorStop(1, "#070a0b");
+  shellGradient.addColorStop(0, "#1d1d22");
+  shellGradient.addColorStop(0.56, colors.surface);
+  shellGradient.addColorStop(1, colors.bgBase);
   ctx.fillStyle = shellGradient;
   ctx.beginPath();
   ctx.arc(center, center, width * 0.46, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.strokeStyle = "#2c3a3a";
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
   ctx.lineWidth = width * 0.055;
   ctx.beginPath();
   ctx.arc(center, center, radius, 0, Math.PI * 2);
@@ -1172,7 +1186,7 @@ function drawMeter() {
     const tickAngle = map(i, -50, 50, startAngle, endAngle);
     const inner = radius - width * (i % 25 === 0 ? 0.06 : 0.035);
     const outer = radius + width * 0.035;
-    drawRadialLine(ctx, center, center, inner, outer, tickAngle, i === 0 ? "#f3fff9" : "#72807c", i === 0 ? 5 : 3);
+    drawRadialLine(ctx, center, center, inner, outer, tickAngle, i === 0 ? colors.text : colors.secondary, i === 0 ? 5 : 3);
   }
 
   drawNeedle(ctx, center, center, radius * 0.95, angle, colorForCents(cents));
@@ -1189,7 +1203,7 @@ function drawMeter() {
 }
 
 function drawTargetArc(ctx, x, y, radius) {
-  ctx.strokeStyle = "rgba(87, 184, 255, 0.65)";
+  ctx.strokeStyle = "rgba(249, 115, 22, 0.58)";
   ctx.lineWidth = 4;
   ctx.setLineDash([10, 14]);
   ctx.beginPath();
@@ -1213,7 +1227,7 @@ function drawLugs(ctx, x, y, radius) {
 
   if (state.lugPattern === "star") {
     const sequence = getLugSequence(state.lugs.length, state.lugPattern);
-    ctx.strokeStyle = "rgba(87, 184, 255, 0.34)";
+    ctx.strokeStyle = "rgba(249, 115, 22, 0.32)";
     ctx.lineWidth = 4;
     ctx.setLineDash([8, 13]);
     ctx.beginPath();
@@ -1235,16 +1249,16 @@ function drawLugs(ctx, x, y, radius) {
     const active = i === state.activeLug;
     const armed = active && state.lugArmed;
 
-    ctx.fillStyle = offset === null ? "#ecf3ef" : colorForCents(offset);
-    ctx.strokeStyle = armed ? "#39d67a" : active ? "#57b8ff" : "rgba(0, 0, 0, 0.4)";
+    ctx.fillStyle = offset === null ? colors.elevated : colorForCents(offset);
+    ctx.strokeStyle = armed ? colors.accent : active ? colors.accentSoft : colors.border;
     ctx.lineWidth = armed ? 9 : active ? 7 : 3;
     ctx.beginPath();
     ctx.arc(lx, ly, 38, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
-    ctx.fillStyle = offset === null ? "#101615" : "#07100c";
-    ctx.font = "800 22px system-ui, sans-serif";
+    ctx.fillStyle = offset === null ? colors.text : colors.bgBase;
+    ctx.font = "700 22px Geist, system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     const label =
@@ -1252,8 +1266,8 @@ function drawLugs(ctx, x, y, radius) {
     ctx.fillText(label, lx, ly);
 
     if (lug.takes.length) {
-      ctx.fillStyle = "#07100c";
-      ctx.font = "800 13px system-ui, sans-serif";
+      ctx.fillStyle = offset === null ? colors.secondary : colors.bgBase;
+      ctx.font = "700 13px Geist, system-ui, sans-serif";
       ctx.fillText(`${lug.takes.length}/${state.requiredTakes}`, lx, ly + 22);
     }
   }
@@ -1270,23 +1284,23 @@ function drawHeadMatcher(ctx, x, y, radius) {
 }
 
 function drawMiniDial(ctx, x, y, hz, label) {
-  ctx.strokeStyle = "#39d67a";
+  ctx.strokeStyle = colors.accent;
   ctx.lineWidth = 7;
   ctx.beginPath();
   ctx.arc(x, y, 58, 0, Math.PI * 2);
   ctx.stroke();
-  ctx.fillStyle = "#f2faf7";
-  ctx.font = "900 24px system-ui, sans-serif";
+  ctx.fillStyle = colors.text;
+  ctx.font = "700 24px Geist, system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.fillText(hz.toFixed(1), x, y - 4);
-  ctx.fillStyle = "#9aa7a3";
-  ctx.font = "800 15px system-ui, sans-serif";
+  ctx.fillStyle = colors.secondary;
+  ctx.font = "600 15px Geist, system-ui, sans-serif";
   ctx.fillText(label, x, y + 25);
 }
 
 function drawInputRing(ctx, x, y, radius) {
   const level = clamp(state.signalRms * 8, 0, 1);
-  ctx.strokeStyle = `rgba(57, 214, 122, ${0.16 + level * 0.65})`;
+  ctx.strokeStyle = `rgba(249, 115, 22, ${0.12 + level * 0.52})`;
   ctx.lineWidth = 5 + level * 10;
   ctx.beginPath();
   ctx.arc(x, y, radius, 0, Math.PI * 2);
@@ -1324,7 +1338,7 @@ function drawWaveform() {
   const width = canvas.width;
   const height = canvas.height;
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#090d0e";
+  ctx.fillStyle = colors.bgBase;
   ctx.fillRect(0, 0, width, height);
   drawGrid(ctx, width, height);
 
@@ -1333,7 +1347,7 @@ function drawWaveform() {
     return;
   }
 
-  ctx.strokeStyle = "#39d67a";
+  ctx.strokeStyle = colors.accent;
   ctx.lineWidth = 3;
   ctx.beginPath();
   const step = Math.max(1, Math.floor(state.timeData.length / width));
@@ -1352,7 +1366,7 @@ function drawSpectrum() {
   const width = canvas.width;
   const height = canvas.height;
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#090d0e";
+  ctx.fillStyle = colors.bgBase;
   ctx.fillRect(0, 0, width, height);
   drawGrid(ctx, width, height);
 
@@ -1364,7 +1378,7 @@ function drawSpectrum() {
   const sampleRate = state.audioContext.sampleRate;
   const fftSize = state.freqData.length * 2;
   const maxHz = 500;
-  ctx.fillStyle = "#57b8ff";
+  ctx.fillStyle = colors.accent;
   for (let x = 0; x < width; x += 2) {
     const hz = (x / width) * maxHz;
     const bin = Math.round((hz * fftSize) / sampleRate);
@@ -1374,7 +1388,7 @@ function drawSpectrum() {
   }
 
   const targetX = (state.targetHz / maxHz) * width;
-  ctx.strokeStyle = "#39d67a";
+  ctx.strokeStyle = colors.success;
   ctx.lineWidth = 3;
   ctx.beginPath();
   ctx.moveTo(targetX, 0);
@@ -1400,8 +1414,8 @@ function drawGrid(ctx, width, height) {
 }
 
 function drawCanvasLabel(ctx, width, height, label) {
-  ctx.fillStyle = "#7f8c88";
-  ctx.font = "800 20px system-ui, sans-serif";
+  ctx.fillStyle = colors.secondary;
+  ctx.font = "700 20px Geist, system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(label, width / 2, height / 2);
@@ -1425,9 +1439,9 @@ function centsBetween(value, target) {
 
 function colorForCents(cents) {
   const abs = Math.abs(cents);
-  if (abs <= 6) return "#39d67a";
-  if (abs <= 22) return "#f4b95a";
-  return "#ff6868";
+  if (abs <= 6) return colors.success;
+  if (abs <= 22) return colors.warning;
+  return colors.error;
 }
 
 function clamp(value, min, max) {
