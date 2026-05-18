@@ -1203,17 +1203,30 @@ function drawMeter() {
   ctx.arc(center, center, radius, 0, Math.PI * 2);
   ctx.stroke();
 
-  const cents = Number.isFinite(state.currentCents) ? clamp(state.currentCents, -50, 50) : 0;
-  const startAngle = -Math.PI * 0.78;
-  const endAngle = Math.PI * 0.78;
+  const hasReading = Number.isFinite(state.currentHz) && Number.isFinite(state.currentCents);
+  const cents = hasReading ? clamp(state.currentCents, -50, 50) : 0;
+  const startAngle = -Math.PI * 1.17;
+  const centerAngle = -Math.PI / 2;
+  const endAngle = Math.PI * 0.17;
   const angle = map(cents, -50, 50, startAngle, endAngle);
 
-  ctx.strokeStyle = colorForCents(cents);
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.16)";
   ctx.lineWidth = width * 0.065;
   ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.arc(center, center, radius, startAngle, angle, false);
+  ctx.arc(center, center, radius, startAngle, endAngle, false);
   ctx.stroke();
+
+  if (hasReading) {
+    ctx.strokeStyle = colorForCents(cents);
+    ctx.beginPath();
+    if (angle >= centerAngle) {
+      ctx.arc(center, center, radius, centerAngle, angle, false);
+    } else {
+      ctx.arc(center, center, radius, angle, centerAngle, false);
+    }
+    ctx.stroke();
+  }
   ctx.lineCap = "butt";
 
   for (let i = -50; i <= 50; i += 10) {
@@ -1223,27 +1236,38 @@ function drawMeter() {
     drawRadialLine(ctx, center, center, inner, outer, tickAngle, i === 0 ? colors.text : colors.secondary, i === 0 ? 5 : 3);
   }
 
-  drawNeedle(ctx, center, center, radius * 0.95, angle, colorForCents(cents));
+  const needleColor = hasReading ? colorForCents(cents) : "rgba(242, 242, 243, 0.48)";
+  drawNeedle(ctx, center, center, radius * 0.95, angle, needleColor);
 
   if (state.mode === "lugs") {
     drawLugs(ctx, center, center, radius * 1.03);
   } else if (state.mode === "heads") {
     drawHeadMatcher(ctx, center, center, radius);
   } else {
-    drawTargetArc(ctx, center, center, radius * 1.18);
+    drawPitchLabels(ctx, center, center, radius * 1.18, startAngle, centerAngle, endAngle, hasReading);
   }
 
   drawInputRing(ctx, center, center, width * 0.47);
 }
 
-function drawTargetArc(ctx, x, y, radius) {
-  ctx.strokeStyle = "rgba(249, 115, 22, 0.58)";
-  ctx.lineWidth = 4;
-  ctx.setLineDash([10, 14]);
-  ctx.beginPath();
-  ctx.arc(x, y, radius, -Math.PI * 0.62, Math.PI * 0.62);
-  ctx.stroke();
-  ctx.setLineDash([]);
+function drawPitchLabels(ctx, x, y, radius, startAngle, centerAngle, endAngle, hasReading) {
+  ctx.save();
+  ctx.font = "700 15px Geist, system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  [
+    { angle: startAngle, label: "FLAT" },
+    { angle: centerAngle, label: "TARGET" },
+    { angle: endAngle, label: "SHARP" },
+  ].forEach((item) => {
+    const lx = x + Math.cos(item.angle) * radius;
+    const ly = y + Math.sin(item.angle) * radius;
+    ctx.fillStyle = item.label === "TARGET" && hasReading ? colors.text : colors.secondary;
+    ctx.fillText(item.label, lx, ly);
+  });
+
+  ctx.restore();
 }
 
 function drawLugs(ctx, x, y, radius) {
