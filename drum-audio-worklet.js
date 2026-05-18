@@ -2,9 +2,9 @@ class DrumInputProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
     const settings = options.processorOptions || {};
-    this.sensitivity = settings.sensitivity || 0.045;
+    this.sensitivity = settings.sensitivity || 0.025;
     this.preRollLength = Math.max(2048, Math.round(sampleRate * 0.09));
-    this.captureLength = Math.max(16384, Math.round(sampleRate * 0.72));
+    this.captureLength = Math.max(16384, Math.round(sampleRate * 0.56));
     this.cooldownSamples = Math.round(sampleRate * 0.36);
     this.levelInterval = Math.round(sampleRate * 0.035);
 
@@ -88,17 +88,24 @@ class DrumInputProcessor extends AudioWorkletProcessor {
   }
 
   updateNoiseFloor(rms) {
-    const capped = Math.min(rms, this.sensitivity * 0.8);
+    const capped = Math.min(rms, this.sensitivity * 0.6);
     this.noiseFloor = this.noiseFloor * 0.985 + capped * 0.015;
   }
 
   shouldCapture(rms, peak) {
-    const adaptiveRms = Math.max(this.sensitivity, this.noiseFloor * 7);
-    const adaptivePeak = Math.max(this.sensitivity * 3, this.noiseFloor * 15);
-    return rms > adaptiveRms && peak > adaptivePeak;
+    const adaptiveRms = Math.max(this.sensitivity * 0.45, this.noiseFloor * 4.2, 0.006);
+    const adaptivePeak = Math.max(this.sensitivity * 1.35, this.noiseFloor * 8, 0.035);
+    return peak > adaptivePeak && (rms > adaptiveRms || peak > adaptivePeak * 1.65);
   }
 
   startCapture() {
+    this.port.postMessage({
+      type: "hit-start",
+      peak: this.blockPeak,
+      rms: this.blockRms,
+      noiseFloor: this.noiseFloor,
+    });
+
     this.capture = new Float32Array(this.captureLength);
     for (let i = 0; i < this.preRoll.length; i += 1) {
       this.capture[i] = this.preRoll[(this.preRollIndex + i) % this.preRoll.length];

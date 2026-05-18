@@ -55,7 +55,7 @@ Good options:
 - Deploy the folder to any HTTPS static host.
 - Use a temporary HTTPS tunnel while developing.
 
-For tuning, pick a drum preset, tap near the center of the head, and let the hit decay naturally. For lug tuning, select the lug count and order, arm the active lug, then capture consistent taps near each lug.
+For tuning, pick a drum preset, tap near the center of the head, and let the hit decay naturally. Leave Target Filter off until the app is reading hits reliably; turn it on only when you want to narrow detection around a known target. For lug tuning, select the lug count and order, arm the active lug, then capture consistent taps near each lug.
 
 ## Deployment
 

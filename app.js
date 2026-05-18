@@ -81,13 +81,15 @@ const state = {
   targetHz: 123.5,
   mode: "pitch",
   searchFactor: 1.4,
-  sensitivity: 0.045,
+  sensitivity: 0.025,
   signalRms: 0,
   signalPeak: 0,
   currentHz: null,
   currentCents: null,
   confidence: 0,
   qualityLabel: "Idle",
+  lastTriggerLevel: null,
+  workletCaptureStartedAt: 0,
   requiredTakes: 3,
   takes: [],
   rejectedTakes: 0,
@@ -183,6 +185,11 @@ function bindControls() {
 
   el.rangeInput.addEventListener("input", () => {
     state.searchFactor = Number(el.rangeInput.value);
+    persistSettings();
+  });
+
+  el.targetFilter.addEventListener("change", () => {
+    resetTakes();
     persistSettings();
   });
 
@@ -373,6 +380,8 @@ function stopMic() {
   state.freqData = null;
   state.signalRms = 0;
   state.signalPeak = 0;
+  state.lastTriggerLevel = null;
+  state.workletCaptureStartedAt = 0;
 
   el.micButton.classList.remove("listening");
   el.micButtonText.textContent = "Start mic";
@@ -392,11 +401,12 @@ function loop(now = performance.now()) {
   const signalLabel = level.peak > 0.5 ? "Hot" : level.rms > state.sensitivity / 2 ? "Live" : "Quiet";
   el.signalReadout.textContent = signalLabel;
 
-  if (!state.usingWorklet && isDrumHit(level, now)) {
+  if (shouldUseAnalyzerHit(level, now)) {
     state.lastHitAt = now;
+    state.lastTriggerLevel = level;
     state.pendingAnalysis = true;
     setStatus("Hit detected", "Analyzing");
-    window.setTimeout(analyzeHit, 55);
+    window.setTimeout(analyzeHit, 70);
   }
 
   drawAll();
@@ -415,17 +425,36 @@ function handleWorkletMessage(event) {
     return;
   }
 
+  if (data.type === "hit-start") {
+    state.lastHitAt = performance.now();
+    state.lastTriggerLevel = {
+      rms: data.rms || state.signalRms,
+      peak: data.peak || state.signalPeak,
+    };
+    state.workletCaptureStartedAt = state.lastHitAt;
+    setStatus("Hit detected", "Capturing");
+    return;
+  }
+
   if (data.type === "hit") {
+    state.lastHitAt = performance.now();
+    state.workletCaptureStartedAt = 0;
     state.pendingAnalysis = true;
     setStatus("Hit detected", "Analyzing");
     analyzeCapturedHit(data);
   }
 }
 
+function shouldUseAnalyzerHit(level, now) {
+  if (state.pendingAnalysis || !isDrumHit(level, now)) return false;
+  if (!state.usingWorklet) return true;
+  return !state.workletCaptureStartedAt || now - state.workletCaptureStartedAt > 950;
+}
+
 function isDrumHit(level, now) {
   const threshold = state.sensitivity;
-  const isPeak = level.peak > threshold * 3.2;
-  const hasBody = level.rms > threshold;
+  const isPeak = level.peak > Math.max(0.04, threshold * 1.35);
+  const hasBody = level.rms > Math.max(0.006, threshold * 0.22) || level.peak > threshold * 2.2;
   const cooledDown = now - state.lastHitAt > 430;
   return isPeak && hasBody && cooledDown && !state.pendingAnalysis;
 }
@@ -443,8 +472,8 @@ function analyzeHit() {
     samples: frame,
     sampleRate: state.audioContext.sampleRate,
     preRollLength: 0,
-    peak: state.signalPeak,
-    rms: state.signalRms,
+    peak: Math.max(state.signalPeak, state.lastTriggerLevel?.peak || 0),
+    rms: Math.max(state.signalRms, state.lastTriggerLevel?.rms || 0),
     noiseFloor: state.sensitivity * 0.25,
     clippedRatio: 0,
   });
@@ -460,12 +489,14 @@ function analyzeCapturedHit(capture) {
     setStatus("Rejected", state.qualityLabel);
     updateTakeUI();
     state.pendingAnalysis = false;
+    state.workletCaptureStartedAt = 0;
     drawAll();
     return;
   }
 
   acceptHit(result);
   state.pendingAnalysis = false;
+  state.workletCaptureStartedAt = 0;
   drawAll();
 }
 
@@ -509,7 +540,7 @@ function analyzeDrumHit(capture) {
   }
 
   const confidence = clamp(fused.confidence * quality.score, 0, 1);
-  if (confidence < 0.48) {
+  if (confidence < 0.3) {
     return {
       accepted: false,
       confidence,
@@ -530,7 +561,7 @@ function analyzeDrumHit(capture) {
 
 function findHitOnset(samples, sampleRate, preRollLength, noiseFloor) {
   const start = Math.max(0, preRollLength - Math.round(sampleRate * 0.04));
-  const threshold = Math.max(state.sensitivity * 1.6, noiseFloor * 10, 0.018);
+  const threshold = Math.max(state.sensitivity * 0.9, noiseFloor * 6, 0.012);
   for (let i = start; i < samples.length; i += 1) {
     if (Math.abs(samples[i]) > threshold) return i;
   }
@@ -802,10 +833,9 @@ function qualityLabelFor(result) {
 
 function getSearchRange() {
   if (!el.targetFilter.checked) {
-    const preset = presets[el.presetSelect.value];
     return {
-      min: preset?.min || 35,
-      max: preset?.max || 450,
+      min: 35,
+      max: 450,
     };
   }
 
@@ -979,6 +1009,9 @@ function loadSettings() {
       state.sensitivity = clamp(saved.sensitivity, 0.01, 0.18);
       el.sensitivityInput.value = String(state.sensitivity);
     }
+    if (typeof saved.targetFilter === "boolean") {
+      el.targetFilter.checked = saved.targetFilter;
+    }
     if (Number.isFinite(saved.requiredTakes)) {
       state.requiredTakes = clamp(Math.round(saved.requiredTakes), 1, 5);
       el.takesSelect.value = String(state.requiredTakes);
@@ -1006,6 +1039,7 @@ function persistSettings() {
     targetHz: state.targetHz,
     searchFactor: state.searchFactor,
     sensitivity: state.sensitivity,
+    targetFilter: el.targetFilter.checked,
     requiredTakes: state.requiredTakes,
     lugCount: state.lugs.length,
     lugPattern: state.lugPattern,
