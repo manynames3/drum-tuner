@@ -24,6 +24,23 @@
             <p id="secureState">Ready</p>
           </div>
         </div>
+
+        <label class="top-preset">
+          <span>Drum preset</span>
+          <select id="presetSelect">
+            <option value="kick22">22 in kick - 60 Hz</option>
+            <option value="kick20">20 in kick - 72 Hz</option>
+            <option value="floor16">16 in floor tom - 87.3 Hz</option>
+            <option value="floor14">14 in floor tom - 98 Hz</option>
+            <option value="rack13">13 in rack tom - 110 Hz</option>
+            <option value="rack12" selected>12 in rack tom - 123.5 Hz</option>
+            <option value="rack10">10 in rack tom - 147 Hz</option>
+            <option value="snare14">14 in snare - 196 Hz</option>
+            <option value="snare14High">14 in snare high - 220 Hz</option>
+            <option value="custom">Custom</option>
+          </select>
+        </label>
+
         <button class="primary-action" id="micButton" type="button">
           <span class="mic-dot" aria-hidden="true"></span>
           <span id="micButtonText">Start mic</span>
@@ -85,22 +102,6 @@
             <h2>Target</h2>
             <span id="presetName">12 in rack tom</span>
           </div>
-
-          <label class="field">
-            <span>Drum preset</span>
-            <select id="presetSelect">
-              <option value="kick22">22 in kick - 60 Hz</option>
-              <option value="kick20">20 in kick - 72 Hz</option>
-              <option value="floor16">16 in floor tom - 87.3 Hz</option>
-              <option value="floor14">14 in floor tom - 98 Hz</option>
-              <option value="rack13">13 in rack tom - 110 Hz</option>
-              <option value="rack12" selected>12 in rack tom - 123.5 Hz</option>
-              <option value="rack10">10 in rack tom - 147 Hz</option>
-              <option value="snare14">14 in snare - 196 Hz</option>
-              <option value="snare14High">14 in snare high - 220 Hz</option>
-              <option value="custom">Custom</option>
-            </select>
-          </label>
 
           <label class="field inline-field">
             <span>Target Hz</span>

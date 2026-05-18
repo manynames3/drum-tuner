@@ -94,7 +94,7 @@ button {
 .app-shell {
   min-height: 100svh;
   padding:
-    max(var(--space-4), env(safe-area-inset-top))
+    max(var(--space-3), env(safe-area-inset-top))
     max(var(--space-4), env(safe-area-inset-right))
     max(var(--space-4), env(safe-area-inset-bottom))
     max(var(--space-4), env(safe-area-inset-left));
@@ -112,17 +112,18 @@ button {
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
     0 16px 48px rgba(0, 0, 0, 0.32);
   display: flex;
-  gap: var(--space-4);
+  flex-wrap: wrap;
+  gap: var(--space-3);
   justify-content: space-between;
-  margin: 0 auto var(--space-4);
+  margin: 0 auto var(--space-3);
   max-width: 1280px;
-  padding: var(--space-3) var(--space-4);
+  padding: 10px var(--space-3);
 }
 
 .brand {
   align-items: center;
   display: flex;
-  gap: var(--space-3);
+  gap: 10px;
   min-width: 0;
 }
 
@@ -138,30 +139,30 @@ button {
     0 12px 28px var(--accent-glow);
   display: grid;
   gap: var(--space-1);
-  grid-template-columns: repeat(3, 9px);
-  height: 52px;
+  grid-template-columns: repeat(3, 7px);
+  height: 42px;
   justify-content: center;
-  padding: 9px;
-  width: 52px;
+  padding: 8px;
+  width: 42px;
 }
 
 .brand-mark span {
   background: rgba(10, 10, 11, 0.88);
   border-radius: 999px 999px 3px 3px;
   display: block;
-  width: 9px;
+  width: 7px;
 }
 
 .brand-mark span:nth-child(1) {
-  height: 20px;
+  height: 16px;
 }
 
 .brand-mark span:nth-child(2) {
-  height: 31px;
+  height: 25px;
 }
 
 .brand-mark span:nth-child(3) {
-  height: 25px;
+  height: 20px;
 }
 
 h1,
@@ -171,13 +172,14 @@ p {
 }
 
 h1 {
-  font-size: 1.55rem;
+  font-size: 1.28rem;
   font-weight: 700;
   letter-spacing: -0.03em;
   line-height: 1.05;
 }
 
 .brand p,
+.top-preset span,
 .panel-heading span,
 .metric-grid span,
 .field span,
@@ -190,6 +192,19 @@ h1 {
   letter-spacing: 0.08em;
   line-height: 1.4;
   text-transform: uppercase;
+}
+
+.top-preset {
+  align-items: center;
+  display: grid;
+  flex: 1 1 360px;
+  gap: 6px;
+  max-width: 460px;
+  min-width: 240px;
+}
+
+.top-preset select {
+  min-height: 42px;
 }
 
 .primary-action,
@@ -218,8 +233,8 @@ h1 {
   font-size: 0.9375rem;
   font-weight: 600;
   gap: 10px;
-  min-height: 46px;
-  padding: 0 20px;
+  min-height: 42px;
+  padding: 0 16px;
   white-space: nowrap;
 }
 
@@ -712,19 +727,63 @@ input[type="range"] {
 
 @media (max-width: 640px) {
   .app-shell {
+    padding-top: max(var(--space-2), env(safe-area-inset-top));
     padding-left: max(var(--space-3), env(safe-area-inset-left));
     padding-right: max(var(--space-3), env(safe-area-inset-right));
   }
 
   .topbar {
-    align-items: stretch;
-    flex-direction: column;
+    align-items: center;
     border-radius: 18px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 8px;
+  }
+
+  .brand-mark {
+    border-radius: 12px;
+    grid-template-columns: repeat(3, 6px);
+    height: 36px;
+    padding: 7px;
+    width: 36px;
+  }
+
+  .brand-mark span {
+    width: 6px;
+  }
+
+  .brand-mark span:nth-child(1) {
+    height: 14px;
+  }
+
+  .brand-mark span:nth-child(2) {
+    height: 22px;
+  }
+
+  .brand-mark span:nth-child(3) {
+    height: 18px;
+  }
+
+  h1 {
+    font-size: 1.08rem;
+  }
+
+  .brand p,
+  .top-preset span {
+    font-size: 0.68rem;
+  }
+
+  .top-preset {
+    grid-column: 1 / -1;
+    max-width: none;
+    min-width: 0;
+    width: 100%;
   }
 
   .primary-action {
     justify-content: center;
-    width: 100%;
+    min-height: 38px;
+    padding: 0 12px;
   }
 
   .tuner-panel,
