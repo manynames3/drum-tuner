@@ -1033,7 +1033,9 @@ function acceptHit(result) {
   }
 
   const reference = referenceHz();
-  pushHistory(result.hz, state.mode === "heads" || !reference ? null : centsBetween(result.hz, reference), result.confidence);
+  const pitchReady = state.mode !== "pitch" || hasStableReading(stats);
+  pushHistory(result.hz, state.mode === "heads" || !reference || !pitchReady ? null : centsBetween(result.hz, reference),
+    result.confidence, state.mode === "pitch" && !pitchReady);
   updateReadouts();
   updateTakeUI();
   updateLugUI();
@@ -1056,7 +1058,7 @@ function addTake(target, result, limit) {
 function computeTakeStats(takes) {
   const valid = takes.filter((take) => Number.isFinite(take.hz));
   if (!valid.length) {
-    return { hz: state.currentHz || state.targetHz, confidence: 0, spreadCents: 0 };
+    return { hz: state.currentHz || state.targetHz, confidence: 0, signalConfidence: 0, spreadCents: 0 };
   }
   const weightSum = valid.reduce((sum, take) => sum + Math.max(0.1, take.confidence), 0);
   const hz = Math.exp(
@@ -1068,6 +1070,7 @@ function computeTakeStats(takes) {
   return {
     hz,
     confidence: clamp(averageConfidence * stability, 0, 1),
+    signalConfidence: averageConfidence,
     spreadCents,
   };
 }
@@ -1113,6 +1116,11 @@ function headRatio() {
 
 function hasStableReading(stats) {
   return state.takes.length >= state.requiredTakes && stats.spreadCents <= 22 && stats.confidence >= .64;
+}
+
+function hasTentativePitch(stats) {
+  return state.mode === "pitch" && state.takes.length >= state.requiredTakes
+    && stats.spreadCents <= 22 && stats.confidence >= .3 && stats.confidence < .64;
 }
 
 function clearPitchLock() {
@@ -1408,6 +1416,7 @@ function updateReadouts() {
     el.noteReadout.textContent = state.running ? "Listening" : "Mic off";
     el.centsReadout.textContent = "--";
     el.confidenceReadout.textContent = "--";
+    document.querySelector("#consistencyReadout").textContent = "No taps yet";
     state.currentCents = null;
     updatePitchIndicator(false);
     updateCaptureSettings();
@@ -1415,31 +1424,40 @@ function updateReadouts() {
   }
   const note = frequencyToNote(state.currentHz);
   const stats = computeTakeStats(state.takes);
+  const pitchReady = state.mode !== "pitch" || hasStableReading(stats);
+  const tentative = hasTentativePitch(stats);
   if (state.running) {
     el.readingState.textContent = state.takes.length < state.requiredTakes
       ? `${state.takes.length} of ${state.requiredTakes} hits captured`
-      : stats.spreadCents > 22 || stats.confidence < .64 ? "Reading uncertain"
+      : stats.spreadCents > 22 ? "Taps vary · try again"
+      : tentative ? state.takes.length < 2 ? "Single hit · pitch uncertain" : "Taps steady · pitch uncertain"
+      : stats.confidence < .64 ? "Pitch uncertain"
       : state.mode === "lugs" && state.lugArmed && state.measuredLug !== state.activeLug
         ? `Next: lug ${state.activeLug + 1}` : "Last captured reading";
   }
   const cents = ref && state.mode !== "heads" ? centsBetween(state.currentHz, ref) : null;
   state.currentCents = cents;
-  const pitchReady = state.mode !== "pitch" || hasStableReading(stats);
-  el.frequencyReadout.textContent = pitchReady ? state.currentHz.toFixed(1) : "--";
+  el.frequencyReadout.textContent = pitchReady ? state.currentHz.toFixed(1)
+    : tentative ? `≈${state.currentHz.toFixed(1)}` : "--";
   const offset = cents === null ? null : `${cents >= 0 ? "+" : ""}${Math.round(cents)} c`;
   el.noteReadout.textContent = state.mode === "lugs"
     ? offset ? `${offset} vs reference` : "Capture a reference lug"
     : state.mode === "heads" ? `${note.name}${note.octave}`
-    : pitchReady ? `${note.name}${note.octave} · ${state.requiredTakes === 1 ? "single hit" : `${state.requiredTakes}-tap average`}` : "Another tap needed";
+    : pitchReady ? `${note.name}${note.octave} · ${state.requiredTakes === 1 ? "single hit" : `${state.requiredTakes}-tap average`}`
+      : tentative ? "Tentative · verify pitch" : "Another tap needed";
   el.centsReadout.textContent = cents === null || !pitchReady ? "--" : `${cents >= 0 ? "+" : ""}${Math.round(cents)} c`;
-  el.confidenceReadout.textContent = `${Math.round(state.confidence * 100)}%`;
-  updatePitchIndicator(pitchReady && cents !== null);
+  el.confidenceReadout.textContent = stats.signalConfidence >= .82 ? "Strong" : stats.signalConfidence >= .64 ? "Good" : "Low";
+  document.querySelector("#consistencyReadout").textContent = state.takes.length < 2
+    ? state.requiredTakes === 1 ? "Single hit" : "Need more taps"
+    : stats.spreadCents <= 22 ? "Steady taps" : "Taps vary";
+  updatePitchIndicator(pitchReady && cents !== null, tentative);
   updateCaptureSettings();
 }
 
-function updatePitchIndicator(ready) {
+function updatePitchIndicator(ready, tentative = false) {
   if (state.mode !== "pitch" || !ready) {
-    el.pitchDeviation.textContent = state.mode === "pitch" && state.currentHz ? "Reading withheld" : "Waiting for a steady reading";
+    el.pitchDeviation.textContent = tentative ? "Tentative · no tuning direction"
+      : state.mode === "pitch" && state.currentHz ? "Reading withheld" : "Waiting for a steady reading";
     el.pitchDeviation.dataset.tone = "neutral";
     el.pitchNeedle.hidden = true;
     return;
@@ -1658,8 +1676,16 @@ function showMeasurementFeedback(stats) {
     }
     return;
   }
+  if (hasTentativePitch(stats)) {
+    setFeedback("Tentative pitch", state.takes.length < 2
+      ? "Pitch signal is unclear. Capture more taps before tuning."
+      : "Taps agree, but the pitch signal is unclear. Adjust phone position and tap again before tuning.", "warning");
+    return;
+  }
   if (state.takes.length < state.requiredTakes || stats.spreadCents > 22 || stats.confidence < .64) {
-    setFeedback("Building a reading", stats.spreadCents > 22 ? "Taps vary. Keep the tap position and strength consistent." : "Keep tapping at the same position for a steadier reading.");
+    setFeedback("Building a reading", stats.spreadCents > 22 ? "Taps vary. Keep the tap position and strength consistent."
+      : stats.confidence < .64 ? "Pitch signal is unclear. Adjust phone position or reduce nearby noise."
+        : "Keep tapping at the same position for a steadier reading.");
     return;
   }
   if (state.mode === "heads") {
@@ -1872,12 +1898,13 @@ function updateCaptureSettings() {
   document.querySelector("#sensitivityValue").textContent = state.sensitivity.toFixed(3);
 }
 
-function pushHistory(hz, cents, confidence = 0) {
+function pushHistory(hz, cents, confidence = 0, tentative = false) {
   state.history.unshift({
     label: state.mode === "lugs" ? `Lug ${state.measuredLug + 1}` : state.mode === "heads" ? state.headSide : "Pitch",
     hz,
     cents,
     confidence,
+    tentative,
     time: new Date(),
   });
   state.history = state.history.slice(0, 9);
@@ -1891,7 +1918,7 @@ function renderHistory() {
     const abs = item.cents === null ? null : Math.abs(item.cents);
     chip.className = `history-chip ${abs === null ? "" : abs <= 6 ? "good" : abs <= 22 ? "warn" : "bad"}`;
     const offset = item.cents === null ? "" : ` · ${item.cents >= 0 ? "+" : ""}${Math.round(item.cents)}c`;
-    chip.textContent = `${item.label} · ${item.hz.toFixed(1)} Hz${offset}`;
+    chip.textContent = `${item.label} · ${item.tentative ? "≈" : ""}${item.hz.toFixed(1)} Hz${offset}`;
     el.historyList.append(chip);
   });
 }

@@ -15,7 +15,7 @@ vm.runInContext(source.replace("\ninit();\n", "\n") + `
 globalThis.api = { analyzeDrumHit, detectPitchYin, detectModalPeakGoertzel,
   state, presets, createLugs, captureActiveLugTake, getLugSequence, centsBetween,
   createHeadState, captureHeadTake, headRatio, el, fusePitchEstimates, createInputAudioContext,
-  referenceHz, getSearchRange, normalizeSavedDrum };
+  referenceHz, getSearchRange, normalizeSavedDrum, computeTakeStats, hasTentativePitch };
 `, context);
 const { api } = context;
 
@@ -31,6 +31,22 @@ test("tom and snare defaults use published center-pitch examples", () => {
   }
   assert.equal(api.presets.kick22.guide, undefined, "kick lug pitches are not center-pitch ranges");
   assert.equal(api.presets.kick20.guide, undefined);
+});
+
+test("tentative pitch needs enough agreeing taps and some signal quality", () => {
+  api.state.mode = "pitch";
+  api.state.requiredTakes = 3;
+  api.state.takes = [94.4, 94.5, 94.6].map(hz => ({ hz, confidence: .44 }));
+  const steady = api.computeTakeStats(api.state.takes);
+  assert.ok(steady.spreadCents < 22);
+  assert.ok(steady.confidence < .64);
+  assert.equal(api.hasTentativePitch(steady), true);
+  api.state.takes = [{ hz: 94.4, confidence: .44 }];
+  assert.equal(api.hasTentativePitch(api.computeTakeStats(api.state.takes)), false);
+  api.state.takes = [94.5, 110, 130].map(hz => ({ hz, confidence: .7 }));
+  assert.equal(api.hasTentativePitch(api.computeTakeStats(api.state.takes)), false);
+  api.state.takes = [94.4, 94.5, 94.6].map(hz => ({ hz, confidence: .9 }));
+  assert.equal(api.hasTentativePitch(api.computeTakeStats(api.state.takes)), false);
 });
 
 function capture(hz, sampleRate = 48000, amplitude = .5) {

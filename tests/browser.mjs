@@ -15,9 +15,13 @@ const output = process.env.SCREENSHOT_DIR || "/tmp/drum-tuner-review";
 await mkdir(output, { recursive: true });
 const failures = [];
 
-async function createPage(width = 390, height = 844, saved = null) {
+async function createPage(width = 390, height = 844, saved = null, exposeApp = false) {
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 2 });
   page.setDefaultTimeout(12000);
+  if (exposeApp) await page.route("**/app.js", async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, body: `${await response.text()}\nwindow.__tunerTest = { state, computeTakeStats, updateReadouts, updateTakeUI, showMeasurementFeedback, acceptHit };` });
+  });
   if (process.env.FALLBACK === "1") await page.route("**/drum-audio-worklet.js", route => route.abort());
   page.on("pageerror", error => failures.push(error.message));
   await page.addInitScript(settings => {
@@ -116,6 +120,53 @@ try {
     assert.equal(await restored.locator("#presetSelect").inputValue(), expectedPreset);
     await restored.close();
   }
+
+  const tentative = await createPage(390, 844, null, true);
+  await tentative.locator("#presetSelect").selectOption("rack10");
+  const setTakes = async (page, hzValues, confidence, requiredTakes = 3) => page.evaluate(({ hzValues, confidence, requiredTakes }) => {
+    const { state, computeTakeStats, updateReadouts, updateTakeUI, showMeasurementFeedback } = window.__tunerTest;
+    state.running = true;
+    state.requiredTakes = requiredTakes;
+    state.takes = hzValues.map(hz => ({ hz, confidence }));
+    state.currentHz = computeTakeStats(state.takes).hz;
+    updateReadouts();
+    updateTakeUI();
+    showMeasurementFeedback(computeTakeStats(state.takes));
+  }, { hzValues, confidence, requiredTakes });
+  await setTakes(tentative, [94.4, 94.5, 94.6], .44);
+  assert.equal(await tentative.locator("#frequencyReadout").innerText(), "≈94.5");
+  assert.equal(await tentative.locator("#centsReadout").innerText(), "--");
+  assert.equal(await tentative.locator("#pitchNeedle").isHidden(), true);
+  assert.equal(await tentative.locator("#feedbackTitle").innerText(), "Tentative pitch");
+  assert.equal(await tentative.locator("#confidenceReadout").innerText(), "Low");
+  assert.equal(await tentative.locator("#consistencyReadout").innerText(), "Steady taps");
+  await tentative.evaluate(() => {
+    const { state, acceptHit } = window.__tunerTest;
+    state.takes = [];
+    state.history = [];
+    for (const hz of [94.4, 94.5, 94.6]) acceptHit({ hz, confidence: .44, source: "test" });
+  });
+  assert.match(await tentative.locator(".history-chip").first().textContent(), /≈94\.6 Hz/);
+  assert.doesNotMatch(await tentative.locator(".history-chip").first().textContent(), /c\b/);
+  await shot(tentative, "tentative-pitch");
+  const narrowTentative = await createPage(320, 568, null, true);
+  await narrowTentative.locator("#presetSelect").selectOption("rack10");
+  await setTakes(narrowTentative, [94.4, 94.5, 94.6], .44);
+  assert.equal(await narrowTentative.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, "tentative pitch overflows narrow phone");
+  await shot(narrowTentative, "320-tentative-pitch");
+  await narrowTentative.close();
+  await setTakes(tentative, [94.5], .44, 1);
+  assert.equal(await tentative.locator("#readingState").innerText(), "Single hit · pitch uncertain");
+  assert.equal(await tentative.locator("#consistencyReadout").innerText(), "Single hit");
+  assert.match(await tentative.locator("#feedbackDetail").innerText(), /Capture more taps/);
+  await setTakes(tentative, [94.5, 110, 130], .7);
+  assert.equal(await tentative.locator("#frequencyReadout").innerText(), "--");
+  assert.equal(await tentative.locator("#consistencyReadout").innerText(), "Taps vary");
+  await setTakes(tentative, [94.4, 94.5, 94.6], .9);
+  assert.equal(await tentative.locator("#frequencyReadout").innerText(), "94.5");
+  assert.equal(await tentative.locator("#pitchNeedle").isVisible(), true);
+  assert.equal(await tentative.locator("#confidenceReadout").innerText(), "Strong");
+  await tentative.close();
 
   // Stress text sizing independently of microphone behavior. These are layout
   // fixtures, not claims about real-device Dynamic Type or VoiceOver behavior.

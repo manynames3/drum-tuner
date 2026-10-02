@@ -36,7 +36,7 @@ The app is designed for tuning taps rather than full-performance drum hits. It i
 - Drum-specific hit quality scoring for weak, clipped, and low-confidence strikes.
 - Modal-frequency scanning plus YIN-style pitch estimation with estimator agreement scoring.
 - Repeated-hit averaging with confidence and take count to reduce single-strike variance.
-- Large pitch readout with a labeled target scale and explicit next action; incomplete or unstable pitch readings are withheld.
+- Large pitch readout with a labeled target scale and explicit next action; agreeing low-quality taps show a tentative Hz estimate without a tuning direction, while incomplete or inconsistent readings stay withheld.
 - Guided lug tuning with 6, 8, and 10 lug layouts, clockwise/star sequences, and a fixed reference from the first stable lug (or a saved target).
 - Batter/resonant head capture with an editable pitch-ratio starting point.
 - Measured-pitch filter lock, enabled only after a stable reading; preset targets cannot bias octave selection.

@@ -94,7 +94,7 @@
               <button id="resetHeadsButton" class="quiet-action" type="button">Reset heads</button>
             </section>
           </div>
-          <div class="session-line"><span class="input-indicator" aria-hidden="true"><i id="inputLevel"></i></span><span id="signalReadout">Mic off</span><span class="confidence">Confidence <strong id="confidenceReadout">--</strong></span></div>
+          <div class="session-line"><span class="input-indicator" aria-hidden="true"><i id="inputLevel"></i></span><span id="signalReadout">Mic off</span><span class="confidence">Pitch signal <strong id="confidenceReadout">--</strong><span class="quality-divider" aria-hidden="true"> · </span><span id="consistencyReadout">No taps yet</span></span></div>
         </section>
         <aside class="control-panel" aria-label="Session settings">
           <details class="target-settings" id="targetSettings">
@@ -138,7 +138,7 @@
     <dialog id="helpDialog" aria-labelledby="guideTitle">
       <div class="section-line"><h2 id="guideTitle">A better tuning tap</h2><button id="closeHelp" class="quiet-action" type="button">Done</button></div>
       <p>Use light, consistent taps in a quiet room. Let each hit decay before the next. If the input clips, move the phone farther away or tap more gently.</p>
-      <h3>Pitch</h3><p>Leave both heads free and tap near the center. This is a whole-drum reading, not an isolated head frequency. Presets are starting points, not specifications. A filter can be locked only after a stable measured reading; unlock it when changing drums.</p>
+      <h3>Pitch</h3><p>Leave both heads free and tap near the center. This is a whole-drum reading, not an isolated head frequency. Presets are starting points, not specifications. A tentative pitch is an estimate from agreeing taps, not a tuning instruction; the offset stays hidden until the signal is clearer. Pitch signal quality is a heuristic, not a probability of accuracy. A filter can be locked only after a stable measured reading; unlock it when changing drums.</p>
       <h3>Lugs</h3><p>Lightly mute the center and tap the same distance from each tension rod. The large numbers identify physical lugs; in Star mode, small badges show the capture step. The first stable lug locks the comparison reference; more captures do not move it. Select a finished lug and choose “Use selected lug as reference” to change it.</p>
       <h3>Heads</h3><p>Select Batter or Resonant, mute the opposite head consistently, and tap the center of the selected head. The ratio compares those two isolated readings. The editable goal is a listening starting point, not a guaranteed sustain or tone prediction.</p>
       <h3>Microphone &amp; privacy</h3><p>Allow microphone access in your browser. Audio is analyzed locally and is not uploaded. Bluetooth and external microphones may change the input source. Keep the app visible while tuning.</p>
