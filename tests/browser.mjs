@@ -75,7 +75,23 @@ try {
     const page = await createPage(width, height);
     for (const mode of ["Pitch", "Lugs", "Heads"]) {
       await page.getByRole("tab", { name: mode, exact: true }).click();
-      if (mode === "Lugs") await page.locator("#lugCountSelect").selectOption("10");
+      if (mode === "Lugs") {
+        await page.locator("#lugCountSelect").selectOption("10");
+        await page.locator('[data-lug-pattern="star"]').click();
+        assert.deepEqual(await page.locator("#measurementGuide .order-step").allTextContents(),
+          ["1", "6", "3", "8", "5", "10", "2", "7", "4", "9"]);
+        assert.equal(await page.locator('[data-lug="5"]').getAttribute("data-capture-step"), "2");
+        assert.equal(await page.locator('[data-lug="5"] span').innerText(), "6", "physical lug number must stay fixed");
+        if (width >= 375 && width < 760) {
+          const guide = await page.locator("#measurementGuide").boundingBox();
+          const last = await page.locator("#measurementGuide .order-step").last().boundingBox();
+          assert.ok(last.x + last.width <= guide.x + guide.width, `capture order clipped at ${width}px`);
+        }
+        if (width === 320 || width === 390) await shot(page, `${width}-lugs-star`);
+        await page.locator('[data-lug-pattern="clockwise"]').click();
+        assert.deepEqual(await page.locator("#measurementGuide .order-step").allTextContents(),
+          ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]);
+      }
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `overflow at ${width} ${mode}`);
       if (width < 760 && mode === "Lugs") {
         const box = await page.locator("#captureLugButton").boundingBox();
@@ -92,7 +108,8 @@ try {
   for (const [saved, expectedHz, expectedPreset] of [
     [{ preset: "snare14" }, "196.0", "snare14"],
     [{ preset: "snare14", targetHz: 180 }, "180.0", "custom"],
-    [{ preset: "__proto__" }, "123.5", "rack12"],
+    [{ preset: "rack12", targetHz: 123.5 }, "110.0", "rack12"],
+    [{ preset: "__proto__" }, "110.0", "rack12"],
   ]) {
     const restored = await createPage(390, 844, saved);
     assert.equal(await restored.locator("#targetInput").inputValue(), expectedHz);
@@ -138,6 +155,14 @@ try {
   }
 
   const page = await createPage();
+  assert.equal(await page.locator("#targetReadout").innerText(), "110.0 Hz");
+  assert.match(await page.locator("#presetGuide").innerText(), /98-131 Hz/);
+  await page.locator("#presetSelect").selectOption("floor16");
+  assert.equal(await page.locator("#targetReadout").innerText(), "69.3 Hz");
+  assert.match(await page.locator("#presetGuide").innerText(), /65.4-73.4 Hz/);
+  await page.locator("#presetSelect").selectOption("kick22");
+  assert.match(await page.locator("#presetGuide").innerText(), /no published center-pitch range/);
+  await page.locator("#presetSelect").selectOption("rack12");
   await page.locator("#helpButton").click();
   assert.equal(await page.locator("#helpDialog").evaluate(d => d.open), true);
   await shot(page, "guide");
@@ -165,14 +190,14 @@ try {
   await page.waitForFunction(() => document.querySelector("#micButtonText").textContent === "Stop mic");
   await shot(page, "listening");
   for (let i = 0; i < 3; i++) {
-    await tap(page, 123.5);
+    await tap(page, 110);
     if (i < 2) {
       assert.equal(await page.locator("#readingState").innerText(), `${i + 1} of 3 hits captured`);
       assert.equal(await page.locator("#frequencyReadout").innerText(), "--", "partial pitch must be withheld");
       assert.equal(await page.locator("#pitchNeedle").isHidden(), true);
     }
   }
-  assert.ok(Math.abs(Number(await page.locator("#frequencyReadout").innerText()) - 123.5) < .5);
+  assert.ok(Math.abs(Number(await page.locator("#frequencyReadout").innerText()) - 110) < .5);
   assert.equal(await page.locator("#pitchNeedle").isVisible(), true);
   assert.equal(await page.locator("#feedbackTitle").innerText(), "On target", await page.locator(".tuner-panel").innerText());
   assert.equal(await page.locator(".history-chip").count(), 3, "one capture per physical tap");
@@ -180,7 +205,7 @@ try {
   await page.locator("#captureSettings summary").click();
   assert.equal(await page.locator("#targetFilter").isEnabled(), true);
   await page.locator("#targetFilter").check();
-  assert.match(await page.locator("#filterReference").innerText(), /Locked to 123/);
+  assert.match(await page.locator("#filterReference").innerText(), /Locked to 110/);
   await page.locator("#tab-lugs").click();
   await page.locator("#tab-pitch").click();
   assert.equal(await page.locator("#targetFilter").isChecked(), false, "mode changes must clear the measured lock");
@@ -195,7 +220,7 @@ try {
   assert.equal(await page.locator("#frequencyReadout").innerText(), "--");
   await page.locator("#takesSelect").selectOption("1");
   await page.locator("#captureSettings summary").click();
-  await tap(page, 110);
+  await tap(page, 87.3);
   assert.equal(await page.locator("#targetFilter").isEnabled(), false, "single-hit mode cannot establish a measured filter lock");
   assert.equal(await page.locator("#feedbackTitle").innerText(), "Below target");
   assert.equal(await page.locator("#pitchNeedle").evaluate(el => parseFloat(el.style.left)), 0, "out-of-range pitch must meet scale endpoint");
@@ -217,6 +242,7 @@ try {
   await page.getByRole("tab", { name: "Lugs", exact: true }).click();
   await page.locator("#lugCountSelect").selectOption("6");
   await page.locator('[data-lug-pattern="star"]').click();
+  assert.deepEqual(await page.locator("#measurementGuide .order-step").allTextContents(), ["1", "4", "2", "5", "3", "6"]);
   await page.locator("#captureLugButton").click();
   const sequence = [0, 3, 1, 4, 2, 5];
   for (const index of sequence) {
@@ -225,6 +251,7 @@ try {
     if (index !== sequence.at(-1)) {
       const next = sequence[sequence.indexOf(index) + 1];
       assert.equal(await page.locator("#readingState").innerText(), `Next: lug ${next + 1}`);
+      assert.equal(await page.locator("#measurementGuide .order-step.current").innerText(), String(next + 1));
       if (index === 0) await shot(page, "next-lug");
     }
   }

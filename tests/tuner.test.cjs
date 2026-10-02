@@ -13,11 +13,25 @@ const context = vm.createContext({
 });
 vm.runInContext(source.replace("\ninit();\n", "\n") + `
 globalThis.api = { analyzeDrumHit, detectPitchYin, detectModalPeakGoertzel,
-  state, createLugs, captureActiveLugTake, getLugSequence, centsBetween,
+  state, presets, createLugs, captureActiveLugTake, getLugSequence, centsBetween,
   createHeadState, captureHeadTake, headRatio, el, fusePitchEstimates, createInputAudioContext,
   referenceHz, getSearchRange, normalizeSavedDrum };
 `, context);
 const { api } = context;
+
+test("tom and snare defaults use published center-pitch examples", () => {
+  for (const [key, low, high] of [
+    ["rack10", 131, 165], ["rack12", 98, 131], ["rack13", 87.3, 104],
+    ["floor14", 82.4, 98], ["floor16", 65.4, 73.4],
+    ["snare14", 165, 233], ["snare14High", 165, 233],
+  ]) {
+    const preset = api.presets[key];
+    assert.deepEqual(Array.from(preset.guide), [low, high]);
+    assert.ok(preset.hz >= low && preset.hz <= high, `${key} target outside guide`);
+  }
+  assert.equal(api.presets.kick22.guide, undefined, "kick lug pitches are not center-pitch ranges");
+  assert.equal(api.presets.kick20.guide, undefined);
+});
 
 function capture(hz, sampleRate = 48000, amplitude = .5) {
   const preRollLength = Math.round(sampleRate * .09);

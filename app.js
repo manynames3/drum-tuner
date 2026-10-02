@@ -1,15 +1,17 @@
 const presets = {
   kick22: { name: "22 in kick", hz: 60, min: 38, max: 110 },
   kick20: { name: "20 in kick", hz: 72, min: 45, max: 125 },
-  floor16: { name: "16 in floor tom", hz: 87.3, min: 55, max: 150 },
-  floor14: { name: "14 in floor tom", hz: 98, min: 65, max: 170 },
-  rack13: { name: "13 in rack tom", hz: 110, min: 75, max: 190 },
-  rack12: { name: "12 in rack tom", hz: 123.5, min: 82, max: 215 },
-  rack10: { name: "10 in rack tom", hz: 147, min: 98, max: 260 },
-  snare14: { name: "14 in snare", hz: 196, min: 130, max: 340 },
-  snare14High: { name: "14 in snare high", hz: 220, min: 145, max: 390 },
+  floor16: { name: "16 in floor tom", hz: 69.3, min: 55, max: 150, guide: [65.4, 73.4] },
+  floor14: { name: "14 in floor tom", hz: 87.3, min: 65, max: 170, guide: [82.4, 98] },
+  rack13: { name: "13 in rack tom", hz: 87.3, min: 75, max: 190, guide: [87.3, 104] },
+  rack12: { name: "12 in rack tom", hz: 110, min: 82, max: 215, guide: [98, 131] },
+  rack10: { name: "10 in rack tom", hz: 147, min: 98, max: 260, guide: [131, 165] },
+  snare14: { name: "14 in snare", hz: 196, min: 130, max: 340, guide: [165, 233] },
+  snare14High: { name: "14 in snare high", hz: 220, min: 145, max: 390, guide: [165, 233] },
   custom: { name: "Custom", hz: 123.5 },
 };
+
+const legacyPresetHz = { floor16: 87.3, floor14: 98, rack13: 110, rack12: 123.5 };
 
 const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
@@ -103,7 +105,7 @@ const state = {
   lastHitAt: 0,
   timeData: null,
   freqData: null,
-  targetHz: 123.5,
+  targetHz: 110,
   mode: "pitch",
   searchFactor: 1.4,
   pitchLockHz: null,
@@ -1311,7 +1313,9 @@ function loadSettings() {
       el.presetSelect.value = saved.preset;
       state.targetHz = presets[saved.preset].hz;
     }
-    if (Number.isFinite(saved.targetHz)) {
+    const oldDefault = Object.hasOwn(legacyPresetHz, saved.preset)
+      && saved.targetHz === legacyPresetHz[saved.preset];
+    if (Number.isFinite(saved.targetHz) && !oldDefault) {
       state.targetHz = clamp(saved.targetHz, 35, 450);
     }
     if (state.targetHz !== presets[el.presetSelect.value]?.hz) el.presetSelect.value = "custom";
@@ -1376,7 +1380,11 @@ function updateTargetUI() {
   const preset = presets[el.presetSelect.value] || presets.custom;
   el.presetName.textContent = el.presetSelect.value === "custom" ? "Custom" : preset.name;
   document.querySelector("#presetDisplay").textContent = el.presetSelect.value === "custom"
-    ? `Custom target - ${state.targetHz.toFixed(1)} Hz` : el.presetSelect.selectedOptions[0].textContent;
+    ? `Custom target - ${state.targetHz.toFixed(1)} Hz` : `${preset.name} - ${state.targetHz.toFixed(1)} Hz`;
+  document.querySelector("#presetGuide").textContent = preset.guide
+    ? `Tune-Bot center-pitch examples: ${preset.guide[0]}-${preset.guide[1]} Hz`
+    : el.presetSelect.value === "custom" ? "Your selected whole-drum target" : "Starter target; no published center-pitch range";
+  document.querySelector("#targetGuide").hidden = !preset.guide;
   el.targetReadout.textContent = `${state.targetHz.toFixed(1)} Hz`;
   document.querySelector("#targetSettings").open = el.presetSelect.value === "custom";
   updateReadouts();
@@ -1461,6 +1469,8 @@ function updateLugPatternUI() {
 
 function updateLugUI() {
   const count = state.lugs.filter(lug => lug.complete).length;
+  const sequence = getLugSequence(state.lugs.length, state.lugPattern);
+  updateLugOrderGuide(sequence);
   el.lugAverage.textContent = `${count} of ${state.lugs.length} captured`;
   el.captureLugButton.textContent = state.lugArmed ? "Pause capture"
     : `${state.lugs[state.activeLug].complete ? "Recapture" : "Capture"} lug ${state.activeLug + 1}`;
@@ -1483,16 +1493,46 @@ function updateLugUI() {
       return button;
     }));
   }
+  el.lugButtons.dataset.pattern = state.lugPattern;
   [...el.lugButtons.children].forEach((button, i) => {
     const lug = state.lugs[i];
+    const step = sequence.indexOf(i) + 1;
     const cents = lug.complete && reference ? centsBetween(lug.hz, reference) : null;
     const offset = cents === null ? null : Math.abs(cents) > 6 && Math.abs(cents) < 7 ? cents.toFixed(1) : Math.round(cents);
     button.setAttribute("aria-pressed", String(i === state.activeLug));
-    button.setAttribute("aria-label", `Lug ${i + 1}, ${lug.hz ? lug.hz.toFixed(1) + " Hz" : "not measured"}${lug.complete ? ", captured" : ""}${cents === null ? "" : ", " + offset + " cents from fixed reference"}`);
+    button.setAttribute("aria-label", `Lug ${i + 1}, ${lug.hz ? lug.hz.toFixed(1) + " Hz" : "not measured"}${lug.complete ? ", captured" : ""}${cents === null ? "" : ", " + offset + " cents from fixed reference"}, capture step ${step} of ${sequence.length}`);
+    button.dataset.captureStep = step;
     button.dataset.tone = cents === null ? "neutral" : Math.abs(cents) <= 6 ? "good" : "adjust";
     button.innerHTML = `<span>${i + 1}</span>${cents === null ? "" : "<small>" + (cents >= 0 ? "+" : "") + offset + "c</small>"}`;
   });
   drawMeter();
+}
+
+function updateLugOrderGuide(sequence) {
+  if (state.mode !== "lugs") return;
+  const label = state.lugPattern === "star" ? "Star order" : "Clockwise order";
+  el.measurementGuide.classList.add("order-guide");
+  el.measurementGuide.setAttribute("aria-label", `${label}: ${sequence.map(index => index + 1).join(", ")}. Selected lug ${state.activeLug + 1}.`);
+  const title = document.createElement("span");
+  title.className = "order-label";
+  title.textContent = state.lugPattern === "star" ? "Star" : "Clockwise";
+  const steps = document.createElement("span");
+  steps.className = "order-steps";
+  sequence.forEach((index, position) => {
+    if (position) {
+      const arrow = document.createElement("span");
+      arrow.className = "order-arrow";
+      arrow.textContent = "›";
+      arrow.setAttribute("aria-hidden", "true");
+      steps.append(arrow);
+    }
+    const step = document.createElement("span");
+    step.className = "order-step";
+    step.textContent = String(index + 1);
+    if (index === state.activeLug) step.classList.add("current");
+    steps.append(step);
+  });
+  el.measurementGuide.replaceChildren(title, steps);
 }
 
 function updateHeadUI() {
@@ -1536,9 +1576,12 @@ function setMode(mode) {
   document.querySelector("#lugSetup").hidden = mode !== "lugs";
   document.querySelector("#headSetup").hidden = mode !== "heads";
   document.querySelector("#headGoal").hidden = mode !== "heads";
-  el.measurementGuide.textContent = mode === "lugs" ? "Mute the center · tap beside each rod"
-    : mode === "heads" ? "Mute the opposite head · tap the selected head's center"
+  if (mode !== "lugs") {
+    el.measurementGuide.classList.remove("order-guide");
+    el.measurementGuide.removeAttribute("aria-label");
+    el.measurementGuide.textContent = mode === "heads" ? "Mute the opposite head · tap the selected head's center"
       : "Both heads free · tap near the center";
+  }
   document.querySelector("#targetSettings").hidden = mode !== "pitch";
   el.lugButtons.hidden = mode !== "lugs";
   el.segments.forEach(segment => {

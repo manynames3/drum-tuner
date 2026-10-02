@@ -23,17 +23,18 @@
         </button>
         <span id="secureState" class="sr-only" role="status">Microphone off</span>
         <label class="top-preset"><span>Drum preset</span>
-          <span id="presetDisplay" class="preset-display" aria-hidden="true">12 in rack tom - 123.5 Hz</span>
+          <span id="presetDisplay" class="preset-display" aria-hidden="true">12 in rack tom - 110.0 Hz</span>
+          <span id="presetGuide" class="preset-guide" aria-hidden="true">Tune-Bot center-pitch examples: 98-131 Hz</span>
           <select id="presetSelect" aria-label="Drum preset">
             <option value="kick22">22 in kick - 60 Hz</option>
             <option value="kick20">20 in kick - 72 Hz</option>
-            <option value="floor16">16 in floor tom - 87.3 Hz</option>
-            <option value="floor14">14 in floor tom - 98 Hz</option>
-            <option value="rack13">13 in rack tom - 110 Hz</option>
-            <option value="rack12" selected>12 in rack tom - 123.5 Hz</option>
-            <option value="rack10">10 in rack tom - 147 Hz</option>
-            <option value="snare14">14 in snare - 196 Hz</option>
-            <option value="snare14High">14 in snare high - 220 Hz</option>
+            <option value="floor16">16 in floor tom - 69.3 Hz (65.4-73.4)</option>
+            <option value="floor14">14 in floor tom - 87.3 Hz (82.4-98)</option>
+            <option value="rack13">13 in rack tom - 87.3 Hz (87.3-104)</option>
+            <option value="rack12" selected>12 in rack tom - 110 Hz (98-131)</option>
+            <option value="rack10">10 in rack tom - 147 Hz (131-165)</option>
+            <option value="snare14">14 in snare - 196 Hz (165-233)</option>
+            <option value="snare14High">14 in snare high - 220 Hz (165-233)</option>
             <option value="custom">Custom target</option>
           </select>
         </label>
@@ -74,7 +75,7 @@
               <div><span class="feedback-label">Next action</span><strong id="feedbackTitle">Ready when you are</strong><p id="feedbackDetail">Start the mic, then tap the center of the head.</p></div>
             </div>
             <div class="metric-grid">
-              <div><span id="referenceLabel">Target</span><strong id="targetReadout">123.5 Hz</strong></div>
+              <div><span id="referenceLabel">Target</span><strong id="targetReadout">110.0 Hz</strong></div>
               <div><span>Offset</span><strong id="centsReadout">--</strong></div>
               <div><span>Captured hits</span><div class="take-progress"><strong id="takeReadout">0 / 3</strong><span id="takeDots" class="take-dots" aria-hidden="true"></span></div></div>
             </div>
@@ -98,7 +99,8 @@
         <aside class="control-panel" aria-label="Session settings">
           <details class="target-settings" id="targetSettings">
             <summary>Adjust target <span id="presetName">12 in rack tom</span></summary>
-            <label class="field inline-field"><span>Frequency <small>Hz</small></span><input id="targetInput" type="number" min="35" max="450" step="0.1" value="123.5" inputmode="decimal" /></label>
+            <label class="field inline-field"><span>Frequency <small>Hz</small></span><input id="targetInput" type="number" min="35" max="450" step="0.1" value="110" inputmode="decimal" /></label>
+            <p id="targetGuide" class="setting-note">Tune-Bot examples are starting points for a center-hit whole-drum pitch, not a pass/fail range. <a href="https://tune-bot.com/tuning-guide/" target="_blank" rel="noopener noreferrer">See tuning guide</a>.</p>
           </details>
           <details class="settings-details" id="captureSettings">
             <summary>Capture settings</summary>
@@ -137,7 +139,7 @@
       <div class="section-line"><h2 id="guideTitle">A better tuning tap</h2><button id="closeHelp" class="quiet-action" type="button">Done</button></div>
       <p>Use light, consistent taps in a quiet room. Let each hit decay before the next. If the input clips, move the phone farther away or tap more gently.</p>
       <h3>Pitch</h3><p>Leave both heads free and tap near the center. This is a whole-drum reading, not an isolated head frequency. Presets are starting points, not specifications. A filter can be locked only after a stable measured reading; unlock it when changing drums.</p>
-      <h3>Lugs</h3><p>Lightly mute the center and tap the same distance from each tension rod. The first stable lug locks the comparison reference; more captures do not move it. Select a finished lug and choose “Use selected lug as reference” to change it. Star order alternates across the head.</p>
+      <h3>Lugs</h3><p>Lightly mute the center and tap the same distance from each tension rod. The large numbers identify physical lugs; in Star mode, small badges show the capture step. The first stable lug locks the comparison reference; more captures do not move it. Select a finished lug and choose “Use selected lug as reference” to change it.</p>
       <h3>Heads</h3><p>Select Batter or Resonant, mute the opposite head consistently, and tap the center of the selected head. The ratio compares those two isolated readings. The editable goal is a listening starting point, not a guaranteed sustain or tone prediction.</p>
       <h3>Microphone &amp; privacy</h3><p>Allow microphone access in your browser. Audio is analyzed locally and is not uploaded. Bluetooth and external microphones may change the input source. Keep the app visible while tuning.</p>
       <p class="guide-note">Measurement accuracy still needs validation across real drums and devices. Use your ears alongside the readings.</p>
