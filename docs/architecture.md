@@ -35,12 +35,17 @@ flowchart LR
 1. The user opens the HTTPS Cloudflare Pages URL.
 2. The browser loads `index.html`, `styles.css`, `app.js`, `drum-audio-worklet.js`, and `manifest.webmanifest`.
 3. When the user taps `Start mic`, the app requests microphone access with `navigator.mediaDevices.getUserMedia`.
-4. The app creates a Web Audio graph with an `AnalyserNode` and, when available, an `AudioWorkletNode`.
+4. The app creates a Web Audio graph with an `AnalyserNode` and, when available, an `AudioWorkletNode`. The audio context follows the input track's reported sample rate when available; absent metadata or an unsupported rate uses the browser default.
 5. The `AudioWorklet` tracks level, noise floor, pre-roll, hit capture windows, clipping, and cooldown.
 6. Captured hit samples are sent to the main thread for hit-quality scoring and pitch analysis.
 7. The pitch path combines modal-frequency scanning and YIN-style estimation, applies confidence thresholds, and rejects unstable readings.
 8. Accepted readings update the active workflow: pitch tuning, lug tuning, or batter/resonant head matching.
 9. User settings are persisted in `localStorage`; microphone audio is not uploaded.
+
+Unfiltered measurements resolve octave disagreement using the measured modal
+candidate, not the preset target. Only explicit pitch-mode target filtering
+allows the target to choose between measured octave candidates. Lug and head
+measurements remain independent of the selected preset.
 
 ## Deployment Shape
 
@@ -50,9 +55,9 @@ flowchart LR
 - Production URL: [https://drum-tuner.pages.dev](https://drum-tuner.pages.dev)
 - Deployment command:
 
-```sh
-npx wrangler pages deploy . --project-name drum-tuner --branch main
-```
+For manual deployment, upload only the public static files. The clean-bundle
+command is in the [README](../README.md#deployment); deploying the repository
+directory would also include local tooling and indexing files.
 
 Cloudflare Pages applies `_headers` so the browser can request microphone permission from the app origin.
 

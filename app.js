@@ -14,16 +14,16 @@ const presets = {
 const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
 const colors = {
-  bgBase: "#0a0a0b",
-  surface: "#111113",
-  elevated: "#1a1a1e",
-  text: "#f2f2f3",
-  secondary: "#8b8b96",
-  accent: "#f97316",
-  accentSoft: "rgba(249, 115, 22, 0.34)",
-  success: "#22c55e",
-  warning: "#eab308",
-  error: "#ef4444",
+  bgBase: "#111315",
+  surface: "#1d2225",
+  elevated: "#2c3438",
+  text: "#f6f7f4",
+  secondary: "#a9b2b4",
+  accent: "#8de0db",
+  accentSoft: "rgba(141, 224, 219, 0.20)",
+  success: "#8de0db",
+  warning: "#f6c56a",
+  error: "#ff8b85",
   border: "rgba(255, 255, 255, 0.12)",
 };
 
@@ -41,7 +41,14 @@ const el = {
   signalReadout: document.querySelector("#signalReadout"),
   confidenceReadout: document.querySelector("#confidenceReadout"),
   takeReadout: document.querySelector("#takeReadout"),
-  stripPointer: document.querySelector("#stripPointer"),
+  feedback: document.querySelector("#feedback"),
+  feedbackTitle: document.querySelector("#feedbackTitle"),
+  feedbackDetail: document.querySelector("#feedbackDetail"),
+  readingState: document.querySelector("#readingState"),
+  pitchDeviation: document.querySelector("#pitchDeviation"),
+  pitchNeedle: document.querySelector("#pitchNeedle"),
+  lugButtons: document.querySelector("#lugButtons"),
+  inputLevel: document.querySelector("#inputLevel"),
   presetSelect: document.querySelector("#presetSelect"),
   presetName: document.querySelector("#presetName"),
   targetInput: document.querySelector("#targetInput"),
@@ -55,9 +62,8 @@ const el = {
   captureLugButton: document.querySelector("#captureLugButton"),
   clearLugsButton: document.querySelector("#clearLugsButton"),
   lugAverage: document.querySelector("#lugAverage"),
-  headSideSelect: document.querySelector("#headSideSelect"),
+  headButtons: document.querySelectorAll("[data-head]"),
   resetHeadsButton: document.querySelector("#resetHeadsButton"),
-  headRatioReadout: document.querySelector("#headRatioReadout"),
   analysisStatus: document.querySelector("#analysisStatus"),
   historyList: document.querySelector("#historyList"),
   modeLabel: document.querySelector("#modeLabel"),
@@ -74,6 +80,11 @@ const state = {
   stream: null,
   rafId: 0,
   running: false,
+  opening: false,
+  micRequest: 0,
+  generation: 0,
+  captureGeneration: 0,
+  measuredLug: null,
   pendingAnalysis: false,
   lastHitAt: 0,
   timeData: null,
@@ -90,6 +101,7 @@ const state = {
   qualityLabel: "Idle",
   lastTriggerLevel: null,
   workletCaptureStartedAt: 0,
+  analyzerCandidateAt: 0,
   requiredTakes: 3,
   takes: [],
   rejectedTakes: 0,
@@ -116,6 +128,7 @@ function createLugs(count) {
     hz: null,
     confidence: 0,
     takes: [],
+    complete: false,
   }));
 }
 
@@ -124,6 +137,7 @@ function createHeadState() {
     hz: null,
     confidence: 0,
     takes: [],
+    complete: false,
   };
 }
 
@@ -151,11 +165,44 @@ function init() {
   updateLugPatternUI();
   updateLugUI();
   updateHeadUI();
+  setMode("pitch");
+  updateCaptureSettings();
+  observeMeterLayout();
+}
+
+function observeMeterLayout() {
+  const meter = document.querySelector(".meter-wrap");
+  const readout = document.querySelector(".readout");
+  const frequency = document.querySelector(".frequency");
+  const unit = document.querySelector(".unit");
+  const measure = document.createElement("canvas").getContext("2d");
+  const textWidth = element => {
+    if (element.hidden) return 0;
+    const style = getComputedStyle(element);
+    measure.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    const text = style.textTransform === "uppercase" ? element.textContent.toUpperCase() : element.textContent;
+    return measure.measureText(text).width;
+  };
+  const resize = () => {
+    const width = meter.getBoundingClientRect().width;
+    const lugMode = state.mode === "lugs";
+    const frequencyWidth = textWidth(el.frequencyReadout) + textWidth(unit) + parseFloat(getComputedStyle(frequency).gap);
+    const widest = Math.max(frequencyWidth, textWidth(el.modeLabel), textWidth(el.noteReadout), textWidth(el.readingState));
+    // Keep enlarged text readable without letting it cover the scale or lug controls.
+    meter.classList.toggle("readout-below", widest > width * (lugMode ? .56 : .7)
+      || readout.getBoundingClientRect().height > width * (lugMode ? .44 : .55));
+  };
+  let frame = 0;
+  const observer = new ResizeObserver(() => {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(resize);
+  });
+  [meter, readout, frequency, el.noteReadout, el.readingState].forEach(element => observer.observe(element));
 }
 
 function bindControls() {
   el.micButton.addEventListener("click", () => {
-    if (state.running) {
+    if (state.running || state.opening) {
       stopMic();
     } else {
       startMic();
@@ -165,19 +212,22 @@ function bindControls() {
   el.presetSelect.addEventListener("change", () => {
     const preset = presets[el.presetSelect.value];
     if (!preset) return;
-    state.targetHz = preset.hz;
-    el.targetInput.value = preset.hz.toFixed(preset.hz % 1 ? 1 : 0);
-    resetTakes();
+    if (el.presetSelect.value !== "custom") state.targetHz = preset.hz;
+    el.targetInput.value = String(state.targetHz);
+    clearMeasurements();
     updateTargetUI();
     persistSettings();
   });
 
-  el.targetInput.addEventListener("input", () => {
-    const next = clamp(Number(el.targetInput.value) || state.targetHz, 35, 450);
-    state.targetHz = next;
-    if (el.presetSelect.value !== "custom") {
-      el.presetSelect.value = "custom";
+  el.targetInput.addEventListener("change", () => {
+    const next = Number(el.targetInput.value);
+    if (!Number.isFinite(next) || next < 35 || next > 450) {
+      el.targetInput.value = String(state.targetHz);
+      setFeedback("Target unchanged", "Choose a frequency from 35 to 450 Hz.", "warning");
+      return;
     }
+    state.targetHz = next;
+    el.presetSelect.value = "custom";
     resetTakes();
     updateTargetUI();
     persistSettings();
@@ -185,28 +235,39 @@ function bindControls() {
 
   el.rangeInput.addEventListener("input", () => {
     state.searchFactor = Number(el.rangeInput.value);
+    updateCaptureSettings();
     persistSettings();
   });
 
   el.targetFilter.addEventListener("change", () => {
+    updateCaptureSettings();
     resetTakes();
     persistSettings();
   });
 
   el.sensitivityInput.addEventListener("input", () => {
     state.sensitivity = Number(el.sensitivityInput.value);
+    updateCaptureSettings();
     state.workletNode?.port.postMessage({ type: "settings", sensitivity: state.sensitivity });
     persistSettings();
   });
 
   el.takesSelect.addEventListener("change", () => {
     state.requiredTakes = Number(el.takesSelect.value);
-    resetTakes();
+    clearMeasurements();
     persistSettings();
   });
 
   el.resetTakesButton.addEventListener("click", () => {
+    if (state.mode === "lugs") {
+      state.activeLug = state.measuredLug ?? state.activeLug;
+      state.lugs[state.activeLug] = createLugs(1)[0];
+      state.lugArmed = false;
+    }
+    if (state.mode === "heads") state.heads[state.headSide] = createHeadState();
     resetTakes();
+    updateLugUI();
+    updateHeadUI();
   });
 
   el.lugCountSelect.addEventListener("change", () => {
@@ -214,6 +275,7 @@ function bindControls() {
     state.lugs = createLugs(count);
     state.activeLug = getLugSequence(count, state.lugPattern)[0];
     state.lugArmed = false;
+    resetTakes();
     updateLugUI();
     persistSettings();
   });
@@ -223,6 +285,7 @@ function bindControls() {
       state.lugPattern = button.dataset.lugPattern;
       state.activeLug = getLugSequence(state.lugs.length, state.lugPattern)[0];
       state.lugArmed = false;
+      resetTakes();
       updateLugPatternUI();
       updateLugUI();
       drawMeter();
@@ -230,40 +293,96 @@ function bindControls() {
     });
   });
 
-  el.captureLugButton.addEventListener("click", () => {
-    state.lugArmed = !state.lugArmed;
+  el.captureLugButton.addEventListener("click", async () => {
     if (state.lugArmed) {
-      setMode("lugs");
-      state.lugs[state.activeLug].takes = [];
-      state.lugs[state.activeLug].hz = null;
-      state.lugs[state.activeLug].confidence = 0;
+      state.lugArmed = false;
+      state.generation += 1;
+      updateLugUI();
+      updateReadouts();
+      setFeedback("Lug capture paused", "Your captured readings are kept.");
+      return;
     }
+    const selectedLug = state.activeLug;
+    const generation = state.generation;
+    if (!state.running) await startMic();
+    if (!state.running || state.mode !== "lugs" || selectedLug !== state.activeLug || generation !== state.generation) return;
+    state.lugs[state.activeLug] = createLugs(1)[0];
+    resetTakes();
+    state.lugArmed = true;
     updateLugUI();
-    drawMeter();
+    showReadyFeedback();
   });
 
   el.clearLugsButton.addEventListener("click", () => {
     state.lugs = createLugs(state.lugs.length);
     state.activeLug = getLugSequence(state.lugs.length, state.lugPattern)[0];
     state.lugArmed = false;
+    resetTakes();
     updateLugUI();
-    drawMeter();
   });
 
-  el.headSideSelect.addEventListener("change", () => {
-    state.headSide = el.headSideSelect.value;
+  el.headButtons.forEach(button => button.addEventListener("click", () => {
+    state.headSide = button.dataset.head;
     resetTakes();
-    setMode("heads");
+    restoreHeadReading();
+    updateHeadUI();
     persistSettings();
-  });
+  }));
 
   el.resetHeadsButton.addEventListener("click", () => {
-    state.heads = {
-      batter: createHeadState(),
-      resonant: createHeadState(),
-    };
+    state.heads = { batter: createHeadState(), resonant: createHeadState() };
+    resetTakes();
     updateHeadUI();
+  });
+
+  el.lugButtons.addEventListener("click", event => {
+    const button = event.target.closest("[data-lug]");
+    if (!button) return;
+    state.activeLug = Number(button.dataset.lug);
+    state.lugArmed = false;
+    resetTakes();
+    const lug = state.lugs[state.activeLug];
+    if (lug.hz) {
+      state.currentHz = lug.hz;
+      state.confidence = lug.confidence;
+      state.takes = [...lug.takes];
+      state.measuredLug = state.activeLug;
+    }
+    updateReadouts();
+    updateTakeUI();
+    updateLugUI();
+    const average = referenceHz("lugs");
+    if (lug.complete && average) {
+      const cents = centsBetween(lug.hz, average);
+      setFeedback(`Lug ${state.activeLug + 1} · ${Math.abs(cents) <= 6 ? "matched" : cents < 0 ? "below average" : "above average"}`,
+        Math.abs(cents) <= 6 ? "Within 6 cents of the lug average."
+          : cents < 0 ? "Tighten this rod slightly, then recapture." : "Loosen this rod slightly, then recapture.",
+        Math.abs(cents) <= 6 ? "good" : "warning");
+    }
     drawMeter();
+  });
+
+  const help = document.querySelector("#helpDialog");
+  document.querySelector("#helpButton").addEventListener("click", () => help.showModal());
+  document.querySelector("#closeHelp").addEventListener("click", () => help.close());
+  help.addEventListener("click", event => { if (event.target === help) {
+    const rect = help.getBoundingClientRect();
+    if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) help.close();
+  } });
+  document.querySelector(".segmented").addEventListener("keydown", event => {
+    const tabs = [...el.segments];
+    const index = tabs.indexOf(document.activeElement);
+    if (index < 0 || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === "Home" ? 0 : event.key === "End" ? 2 : (index + (event.key === "ArrowRight" ? 1 : 2)) % 3;
+    setMode(tabs[next].dataset.mode);
+    tabs[next].focus();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && (state.running || state.opening)) {
+      stopMic();
+      setFeedback("Microphone paused", "Start the mic again when you return.");
+    }
   });
 
   el.segments.forEach((segment) => {
@@ -273,9 +392,23 @@ function bindControls() {
   window.addEventListener("resize", drawAll);
 }
 
+function createInputAudioContext(stream) {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  const inputRate = stream.getAudioTracks()[0]?.getSettings?.().sampleRate;
+  const options = { latencyHint: "interactive" };
+  if (Number.isFinite(inputRate) && inputRate > 0) options.sampleRate = inputRate;
+  try {
+    return new AudioContextClass(options);
+  } catch (error) {
+    if (!options.sampleRate || error.name !== "NotSupportedError") throw error;
+    return new AudioContextClass({ latencyHint: "interactive" });
+  }
+}
+
 async function startMic() {
+  if (state.opening || state.running) return;
   if (!navigator.mediaDevices?.getUserMedia) {
-    setStatus("Mic unavailable", "This browser cannot open the microphone");
+    setFeedback("Microphone unavailable", window.isSecureContext ? "Open in Safari or Chrome and allow microphone access." : "Open this app over HTTPS to use the microphone.", "error");
     return;
   }
 
@@ -284,9 +417,15 @@ async function startMic() {
     return;
   }
 
+  state.opening = true;
+  const request = ++state.micRequest;
+  el.micButtonText.textContent = "Cancel";
+  el.captureLugButton.disabled = true;
+  let stream;
+  let audioContext;
   try {
-    setStatus("Opening mic", "Waiting for permission");
-    const stream = await navigator.mediaDevices.getUserMedia({
+    setFeedback("Allow microphone access", "Your browser is waiting for permission. Audio stays on this device.");
+    stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: false,
         noiseSuppression: false,
@@ -296,12 +435,14 @@ async function startMic() {
       video: false,
     });
 
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    const audioContext = new AudioContextClass({ latencyHint: "interactive" });
+    if (request !== state.micRequest) { stream.getTracks().forEach(track => track.stop()); return; }
+    state.stream = stream;
+    audioContext = createInputAudioContext(stream);
+    state.audioContext = audioContext;
     await audioContext.resume();
 
     const analyser = audioContext.createAnalyser();
-    analyser.fftSize = 8192;
+    analyser.fftSize = 16384;
     analyser.minDecibels = -95;
     analyser.maxDecibels = -18;
     analyser.smoothingTimeConstant = 0.55;
@@ -331,10 +472,15 @@ async function startMic() {
         state.silentGain = silentGain;
         usingWorklet = true;
       } catch {
-        setStatus("Fallback", "Analyzer mode");
+        if (request === state.micRequest) setStatus("Listening", "Standard capture");
       }
     }
 
+    if (request !== state.micRequest) {
+      stream.getTracks().forEach(track => track.stop());
+      await audioContext.close();
+      return;
+    }
     state.stream = stream;
     state.audioContext = audioContext;
     state.analyser = analyser;
@@ -347,14 +493,44 @@ async function startMic() {
 
     el.micButton.classList.add("listening");
     el.micButtonText.textContent = "Stop mic";
-    setStatus("Listening", usingWorklet ? "Worklet ready" : "Analyzer fallback");
+    el.micButton.setAttribute("aria-pressed", "true");
+    stream.getAudioTracks().forEach(track => track.addEventListener("ended", () => {
+      if (state.running) { stopMic(); setFeedback("Microphone disconnected", "Reconnect your input, then start the mic again.", "error"); }
+    }));
+    audioContext.addEventListener("statechange", () => {
+      if (state.running && ["suspended", "interrupted"].includes(audioContext.state)) {
+        stopMic(); setFeedback("Audio interrupted", "Start the mic again to resume tuning.", "warning");
+      }
+    });
+    updateSecureState();
+    updateReadouts();
+    showReadyFeedback();
     loop();
   } catch (error) {
-    setStatus("Mic blocked", error?.message || "Permission was not granted");
+    stream?.getTracks().forEach(track => track.stop());
+    if (audioContext && audioContext.state !== "closed") await audioContext.close().catch(() => {});
+    if (request !== state.micRequest) return;
+    state.stream = null;
+    state.audioContext = null;
+    const denied = ["NotAllowedError", "PermissionDeniedError"].includes(error?.name);
+    setFeedback(denied ? "Microphone access blocked" : "Microphone unavailable",
+      denied ? "Allow microphone access in your browser's site settings, then try again." : "Check your microphone connection and close other audio apps, then try again.", "error");
+    el.micButtonText.textContent = "Try mic again";
+    el.secureState.textContent = "Mic unavailable";
+  } finally {
+    if (request === state.micRequest) {
+      state.opening = false;
+      el.captureLugButton.disabled = false;
+    }
   }
 }
 
 function stopMic() {
+  state.micRequest += 1;
+  state.generation += 1;
+  state.lugArmed = false;
+  state.opening = false;
+  el.captureLugButton.disabled = false;
   cancelAnimationFrame(state.rafId);
   state.rafId = 0;
   state.running = false;
@@ -367,7 +543,7 @@ function stopMic() {
   if (state.silentGain) state.silentGain.disconnect();
   if (state.source) state.source.disconnect();
   if (state.stream) state.stream.getTracks().forEach((track) => track.stop());
-  if (state.audioContext) state.audioContext.close();
+  if (state.audioContext) state.audioContext.close().catch(() => {});
 
   state.audioContext = null;
   state.analyser = null;
@@ -385,7 +561,13 @@ function stopMic() {
 
   el.micButton.classList.remove("listening");
   el.micButtonText.textContent = "Start mic";
-  setStatus("Mic off", "Ready");
+  el.micButton.setAttribute("aria-pressed", "false");
+  el.inputLevel.style.transform = "scaleX(0)";
+  setStatus("Mic off", "Mic off");
+  updateSecureState();
+  updateReadouts();
+  updateLugUI();
+  setFeedback("Microphone stopped", state.currentHz ? "Last reading held. Start the mic to measure again." : "Start the mic when you are ready.");
   drawAll();
 }
 
@@ -400,13 +582,16 @@ function loop(now = performance.now()) {
   state.signalPeak = level.peak;
   const signalLabel = level.peak > 0.5 ? "Hot" : level.rms > state.sensitivity / 2 ? "Live" : "Quiet";
   el.signalReadout.textContent = signalLabel;
+  el.inputLevel.style.transform = `scaleX(${clamp(level.rms * 8, 0, 1)})`;
 
   if (shouldUseAnalyzerHit(level, now)) {
     state.lastHitAt = now;
     state.lastTriggerLevel = level;
     state.pendingAnalysis = true;
     setStatus("Hit detected", "Analyzing");
-    window.setTimeout(analyzeHit, 70);
+    const generation = state.generation;
+    // Preserve the attack plus enough decay cycles for the fallback's first window.
+    window.setTimeout(() => { if (generation === state.generation) analyzeHit(); }, 260);
   }
 
   drawAll();
@@ -415,7 +600,7 @@ function loop(now = performance.now()) {
 
 function handleWorkletMessage(event) {
   const data = event.data;
-  if (!data) return;
+  if (!data || !state.running) return;
 
   if (data.type === "level") {
     state.signalRms = data.rms || 0;
@@ -426,6 +611,7 @@ function handleWorkletMessage(event) {
   }
 
   if (data.type === "hit-start") {
+    state.captureGeneration = state.generation;
     state.lastHitAt = performance.now();
     state.lastTriggerLevel = {
       rms: data.rms || state.signalRms,
@@ -437,6 +623,7 @@ function handleWorkletMessage(event) {
   }
 
   if (data.type === "hit") {
+    if (state.captureGeneration !== state.generation) { state.workletCaptureStartedAt = 0; return; }
     state.lastHitAt = performance.now();
     state.workletCaptureStartedAt = 0;
     state.pendingAnalysis = true;
@@ -446,9 +633,16 @@ function handleWorkletMessage(event) {
 }
 
 function shouldUseAnalyzerHit(level, now) {
-  if (state.pendingAnalysis || !isDrumHit(level, now)) return false;
+  if (state.pendingAnalysis || !isDrumHit(level, now)) {
+    state.analyzerCandidateAt = 0;
+    return false;
+  }
   if (!state.usingWorklet) return true;
-  return !state.workletCaptureStartedAt || now - state.workletCaptureStartedAt > 950;
+  if (state.workletCaptureStartedAt && now - state.workletCaptureStartedAt < 950) return false;
+  if (now - state.lastHitAt < 950) return false;
+  // Give the worklet's hit-start message time to arrive before using the fallback.
+  if (!state.analyzerCandidateAt) state.analyzerCandidateAt = now;
+  return now - state.analyzerCandidateAt >= 120;
 }
 
 function isDrumHit(level, now) {
@@ -480,6 +674,11 @@ function analyzeHit() {
 }
 
 function analyzeCapturedHit(capture) {
+  if (state.mode === "lugs" && !state.lugArmed) {
+    state.pendingAnalysis = false;
+    state.workletCaptureStartedAt = 0;
+    return;
+  }
   const result = analyzeDrumHit(capture);
 
   if (!result.accepted) {
@@ -627,20 +826,25 @@ function detectModalPeakGoertzel(samples, sampleRate, minFreq, maxFreq) {
   let bestIndex = -1;
   let bestPower = -Infinity;
   let secondPower = -Infinity;
+  const windowed = new Float32Array(samples.length);
+  for (let i = 0; i < samples.length; i += 1) {
+    windowed[i] = samples[i] * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / (samples.length - 1)));
+  }
 
   for (let freq = minFreq; freq <= maxFreq; freq += step) {
-    const power = goertzelPower(samples, sampleRate, freq);
+    const power = goertzelPower(windowed, sampleRate, freq);
     bins.push({ freq, power });
     if (power > bestPower) {
-      secondPower = bestPower;
       bestPower = power;
       bestIndex = bins.length - 1;
-    } else if (power > secondPower && Math.abs(freq - bins[bestIndex]?.freq) > step * 6) {
-      secondPower = power;
     }
   }
 
   if (bestIndex < 0 || !Number.isFinite(bestPower) || bestPower <= 0) return null;
+  // Adjacent bins belong to the same peak, not to competing drum modes.
+  const separation = Math.max(step * 6, 2 * sampleRate / samples.length);
+  secondPower = bins.reduce((best, bin) =>
+    Math.abs(bin.freq - bins[bestIndex].freq) > separation ? Math.max(best, bin.power) : best, 0);
 
   const left = bins[bestIndex - 1]?.power ?? bestPower;
   const center = bestPower;
@@ -665,8 +869,7 @@ function goertzelPower(samples, sampleRate, freq) {
   let q2 = 0;
 
   for (let i = 0; i < samples.length; i += 1) {
-    const windowValue = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (samples.length - 1));
-    q0 = coeff * q1 - q2 + samples[i] * windowValue;
+    q0 = coeff * q1 - q2 + samples[i];
     q2 = q1;
     q1 = q0;
   }
@@ -713,13 +916,15 @@ function fusePitchEstimates(yin, modal) {
     Math.abs(centsBetween(yin.hz / 2, modal.hz)),
   );
   if (octaveDiff <= 45) {
-    const corrected = Math.abs(centsBetween(yin.hz * 2, state.targetHz)) < Math.abs(centsBetween(yin.hz, state.targetHz))
-      ? yin.hz * 2
-      : yin.hz;
+    // The strongest measured mode remains independent of a preset unless the
+    // user explicitly narrows pitch detection around their selected target.
+    const targetFocused = state.mode === "pitch" && el.targetFilter.checked;
+    const chosen = targetFocused && Math.abs(centsBetween(yin.hz, state.targetHz)) < Math.abs(centsBetween(modal.hz, state.targetHz))
+      ? yin : modal;
     return {
-      hz: corrected,
+      hz: chosen.hz,
       confidence: clamp(Math.max(yin.confidence, modal.confidence) * 0.82, 0, 1),
-      source: "octave-corrected",
+      source: "octave-resolved",
     };
   }
 
@@ -732,6 +937,13 @@ function fusePitchEstimates(yin, modal) {
 }
 
 function acceptHit(result) {
+  if (state.mode === "lugs" && !state.lugArmed) return;
+  if (state.mode === "lugs") {
+    state.measuredLug = state.activeLug;
+    state.takes = [...state.lugs[state.activeLug].takes];
+  } else if (state.mode === "heads") {
+    state.takes = [...state.heads[state.headSide].takes];
+  }
   addTake(state.takes, result, state.requiredTakes);
   const stats = computeTakeStats(state.takes);
   state.currentHz = stats.hz;
@@ -747,12 +959,14 @@ function acceptHit(result) {
     captureHeadTake(result);
   }
 
-  pushHistory(result.hz, centsBetween(result.hz, state.targetHz), result.confidence);
+  const reference = referenceHz();
+  pushHistory(result.hz, state.mode === "heads" || !reference ? null : centsBetween(result.hz, reference), result.confidence);
   updateReadouts();
   updateTakeUI();
   updateLugUI();
   updateHeadUI();
   setStatus("Captured", `${stats.hz.toFixed(1)} Hz`);
+  showMeasurementFeedback(stats);
   persistSettings();
 }
 
@@ -791,13 +1005,13 @@ function captureActiveLugTake(result) {
   const stats = computeTakeStats(lug.takes);
   lug.hz = stats.hz;
   lug.confidence = stats.confidence;
-
-  if (lug.takes.length >= state.requiredTakes && stats.spreadCents <= 22) {
-    state.activeLug = getNextLugIndex();
-    if (!state.lugs[state.activeLug].hz) {
-      state.lugs[state.activeLug].takes = [];
-      state.lugs[state.activeLug].confidence = 0;
-    }
+  lug.complete = lug.takes.length >= state.requiredTakes && stats.spreadCents <= 22 && stats.confidence >= .64;
+  if (lug.complete) {
+    const sequence = getLugSequence(state.lugs.length, state.lugPattern);
+    const at = sequence.indexOf(state.activeLug);
+    const remaining = [...sequence.slice(at + 1), ...sequence.slice(0, at)].find(index => !state.lugs[index].complete);
+    if (remaining === undefined) state.lugArmed = false;
+    else state.activeLug = remaining;
   }
 }
 
@@ -813,15 +1027,28 @@ function captureHeadTake(result) {
   const stats = computeTakeStats(head.takes);
   head.hz = stats.hz;
   head.confidence = stats.confidence;
+  head.complete = head.takes.length >= state.requiredTakes && stats.spreadCents <= 22 && stats.confidence >= .64;
+}
+
+function headRatio() {
+  return state.heads.batter.complete && state.heads.resonant.complete
+    ? state.heads.resonant.hz / state.heads.batter.hz : null;
 }
 
 function resetTakes() {
   state.takes = [];
+  state.pendingAnalysis = false;
+  state.analyzerCandidateAt = 0;
   state.rejectedTakes = 0;
   state.confidence = 0;
   state.qualityLabel = "Idle";
+  state.currentHz = null;
+  state.currentCents = null;
+  state.measuredLug = null;
+  state.generation += 1;
   updateTakeUI();
   updateReadouts();
+  showReadyFeedback();
   drawMeter();
 }
 
@@ -832,7 +1059,7 @@ function qualityLabelFor(result) {
 }
 
 function getSearchRange() {
-  if (!el.targetFilter.checked) {
+  if (!el.targetFilter.checked || state.mode !== "pitch") {
     return {
       min: 35,
       max: 450,
@@ -888,6 +1115,10 @@ function detectPitchYin(input, sampleRate, minFreq, maxFreq) {
   for (let tau = 1; tau <= maxTau; tau += 1) {
     runningSum += diff[tau];
     cmnd[tau] = diff[tau] * tau / (runningSum || 1);
+  }
+
+  // Complete normalization before looking ahead for a local minimum.
+  for (let tau = minTau; tau <= maxTau; tau += 1) {
     if (tau >= minTau && cmnd[tau] < threshold) {
       while (tau + 1 <= maxTau && cmnd[tau + 1] < cmnd[tau]) {
         tau += 1;
@@ -991,18 +1222,19 @@ function measureLevel(buffer) {
 function loadSettings() {
   try {
     const saved = JSON.parse(localStorage.getItem("drumTunerSettings") || "null");
-    if (!saved) return;
+    if (!saved || typeof saved !== "object" || Array.isArray(saved)) return;
 
-    if (presets[saved.preset]) {
+    if (Object.hasOwn(presets, saved.preset)) {
       el.presetSelect.value = saved.preset;
       state.targetHz = presets[saved.preset].hz;
     }
     if (Number.isFinite(saved.targetHz)) {
       state.targetHz = clamp(saved.targetHz, 35, 450);
-      el.targetInput.value = state.targetHz.toFixed(1);
     }
+    if (state.targetHz !== presets[el.presetSelect.value]?.hz) el.presetSelect.value = "custom";
+    el.targetInput.value = state.targetHz.toFixed(1);
     if (Number.isFinite(saved.searchFactor)) {
-      state.searchFactor = clamp(saved.searchFactor, 0.5, 2.5);
+      state.searchFactor = clamp(saved.searchFactor, 1.1, 2.5);
       el.rangeInput.value = String(state.searchFactor);
     }
     if (Number.isFinite(saved.sensitivity)) {
@@ -1026,10 +1258,9 @@ function loadSettings() {
     }
     if (saved.headSide === "batter" || saved.headSide === "resonant") {
       state.headSide = saved.headSide;
-      el.headSideSelect.value = saved.headSide;
     }
   } catch {
-    localStorage.removeItem("drumTunerSettings");
+    // Invalid or unavailable storage must not prevent tuning.
   }
 }
 
@@ -1053,48 +1284,85 @@ function persistSettings() {
 }
 
 function updateSecureState() {
-  const isLocal = ["localhost", "127.0.0.1", ""].includes(location.hostname);
-  if (window.isSecureContext || isLocal) {
-    el.secureState.textContent = "Mic ready";
-    return;
-  }
-  el.secureState.textContent = "HTTPS required on iPhone";
+  el.secureState.textContent = state.running ? "Microphone on" : window.isSecureContext ? "Microphone off" : "HTTPS required";
 }
 
 function updateTargetUI() {
   const preset = presets[el.presetSelect.value] || presets.custom;
   el.presetName.textContent = el.presetSelect.value === "custom" ? "Custom" : preset.name;
+  document.querySelector("#presetDisplay").textContent = el.presetSelect.value === "custom"
+    ? `Custom target - ${state.targetHz.toFixed(1)} Hz` : el.presetSelect.selectedOptions[0].textContent;
   el.targetReadout.textContent = `${state.targetHz.toFixed(1)} Hz`;
+  document.querySelector("#targetSettings").open = el.presetSelect.value === "custom";
   updateReadouts();
   drawMeter();
 }
 
 function updateReadouts() {
+  const ref = referenceHz();
+  document.querySelector("#referenceLabel").textContent = state.mode === "lugs" ? "Lug average" : state.mode === "heads" ? "Resonant / batter" : "Target";
+  el.targetReadout.textContent = state.mode === "heads"
+    ? headRatio() ? headRatio().toFixed(2) + "x" : "--"
+    : ref ? ref.toFixed(1) + " Hz" : "--";
+  el.modeLabel.textContent = state.mode === "lugs" ? `Lug ${(state.measuredLug ?? state.activeLug) + 1}`
+    : state.mode === "heads" ? state.headSide === "batter" ? "Batter head" : "Resonant head" : "Head pitch";
+  el.readingState.textContent = state.currentHz
+    ? state.running ? "Last captured reading" : "Mic off · reading held"
+    : state.running ? "Listening for a tap" : "Ready to listen";
+  el.readingState.hidden = !state.currentHz;
   if (!state.currentHz) {
-    el.frequencyReadout.textContent = "-- Hz";
-    el.noteReadout.textContent = state.running ? "Listening" : "Tap a drum";
-    el.centsReadout.textContent = "-- cents";
-    el.confidenceReadout.textContent = "--%";
-    el.stripPointer.style.left = "50%";
+    el.frequencyReadout.textContent = "--";
+    el.noteReadout.textContent = state.running ? "Listening" : "Mic off";
+    el.centsReadout.textContent = "--";
+    el.confidenceReadout.textContent = "--";
+    state.currentCents = null;
+    updatePitchIndicator(false);
     return;
   }
-
   const note = frequencyToNote(state.currentHz);
-  const cents = centsBetween(state.currentHz, state.targetHz);
+  const stats = computeTakeStats(state.takes);
+  if (state.running) {
+    el.readingState.textContent = state.takes.length < state.requiredTakes
+      ? `${state.takes.length} of ${state.requiredTakes} hits captured`
+      : stats.spreadCents > 22 || stats.confidence < .64 ? "Reading uncertain"
+      : state.mode === "lugs" && state.lugArmed && state.measuredLug !== state.activeLug
+        ? `Next: lug ${state.activeLug + 1}` : "Last captured reading";
+  }
+  const cents = ref && state.mode !== "heads" ? centsBetween(state.currentHz, ref) : null;
   state.currentCents = cents;
-  el.frequencyReadout.textContent = `${state.currentHz.toFixed(1)} Hz`;
-  el.noteReadout.textContent = `${note.name}${note.octave} (${note.cents >= 0 ? "+" : ""}${note.cents}c)`;
-  el.centsReadout.textContent = `${cents >= 0 ? "+" : ""}${Math.round(cents)} cents`;
+  const pitchReady = state.mode !== "pitch" ||
+    state.takes.length >= state.requiredTakes && stats.spreadCents <= 22 && stats.confidence >= .64;
+  el.frequencyReadout.textContent = pitchReady ? state.currentHz.toFixed(1) : "--";
+  const offset = cents === null ? null : `${cents >= 0 ? "+" : ""}${Math.round(cents)} c`;
+  el.noteReadout.textContent = state.mode === "lugs"
+    ? offset ? `${offset} vs lug average` : "Need another lug"
+    : state.mode === "heads" ? `${note.name}${note.octave}`
+    : pitchReady ? `${note.name}${note.octave} · ${state.requiredTakes === 1 ? "single hit" : `${state.requiredTakes}-tap average`}` : "Another tap needed";
+  el.centsReadout.textContent = cents === null || !pitchReady ? "--" : `${cents >= 0 ? "+" : ""}${Math.round(cents)} c`;
   el.confidenceReadout.textContent = `${Math.round(state.confidence * 100)}%`;
-  el.stripPointer.style.left = `${clamp(50 + cents, 0, 100)}%`;
+  updatePitchIndicator(pitchReady && cents !== null);
+}
+
+function updatePitchIndicator(ready) {
+  if (state.mode !== "pitch" || !ready) {
+    el.pitchDeviation.textContent = state.mode === "pitch" && state.currentHz ? "Reading withheld" : "Waiting for a steady reading";
+    el.pitchDeviation.dataset.tone = "neutral";
+    el.pitchNeedle.hidden = true;
+    return;
+  }
+  const cents = state.currentCents;
+  const distance = Math.round(Math.abs(cents));
+  el.pitchDeviation.textContent = distance <= 6 ? `On target · ${distance} c` :
+    `${cents < 0 ? "Below" : "Above"} target · ${distance} c`;
+  el.pitchDeviation.dataset.tone = distance <= 6 ? "good" : "warning";
+  el.pitchNeedle.hidden = false;
+  el.pitchNeedle.style.left = `${50 + clamp(cents, -50, 50)}%`;
 }
 
 function updateTakeUI() {
-  const rejected = state.rejectedTakes ? ` R${state.rejectedTakes}` : "";
-  el.takeReadout.textContent = `${Math.min(state.takes.length, state.requiredTakes)}/${state.requiredTakes}${rejected}`;
-  if (!state.currentHz) {
-    el.confidenceReadout.textContent = state.confidence ? `${Math.round(state.confidence * 100)}%` : "--%";
-  }
+  el.takeReadout.textContent = `${Math.min(state.takes.length, state.requiredTakes)} / ${state.requiredTakes}`;
+  document.querySelector("#takeDots").innerHTML = Array.from({ length: state.requiredTakes }, (_, i) =>
+    `<i class="${i < state.takes.length ? "filled" : ""}"></i>`).join("");
 }
 
 function updateLugPatternUI() {
@@ -1106,53 +1374,188 @@ function updateLugPatternUI() {
 }
 
 function updateLugUI() {
-  const readings = state.lugs.map((lug) => lug.hz).filter((value) => Number.isFinite(value));
-  if (!readings.length) {
-    el.lugAverage.textContent = state.lugArmed ? `Lug ${state.activeLug + 1}` : "-- Hz avg";
-    el.captureLugButton.textContent = state.lugArmed ? `Pause lug ${state.activeLug + 1}` : `Arm lug ${state.activeLug + 1}`;
-    return;
+  const count = state.lugs.filter(lug => lug.complete).length;
+  el.lugAverage.textContent = `${count} of ${state.lugs.length} captured`;
+  el.captureLugButton.textContent = state.lugArmed ? "Pause capture"
+    : `${state.lugs[state.activeLug].complete ? "Recapture" : "Capture"} lug ${state.activeLug + 1}`;
+  el.captureLugButton.setAttribute("aria-pressed", String(state.lugArmed));
+  const average = referenceHz("lugs");
+  if (el.lugButtons.children.length !== state.lugs.length) {
+    el.lugButtons.replaceChildren(...state.lugs.map((_, i) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "lug-point";
+      button.dataset.lug = i;
+      const angle = -Math.PI / 2 + Math.PI * 2 * i / state.lugs.length;
+      button.style.left = `${50 + Math.cos(angle) * 39}%`;
+      button.style.top = `${50 + Math.sin(angle) * 39}%`;
+      return button;
+    }));
   }
-  const average = readings.reduce((sum, value) => sum + value, 0) / readings.length;
-  const active = state.lugs[state.activeLug];
-  const activeTakes = active?.takes.length || 0;
-  el.lugAverage.textContent = state.lugArmed
-    ? `Lug ${state.activeLug + 1} ${activeTakes}/${state.requiredTakes}`
-    : `${average.toFixed(1)} Hz avg`;
-  el.captureLugButton.textContent = state.lugArmed ? `Pause lug ${state.activeLug + 1}` : `Arm lug ${state.activeLug + 1}`;
+  [...el.lugButtons.children].forEach((button, i) => {
+    const lug = state.lugs[i];
+    const cents = lug.complete && average ? centsBetween(lug.hz, average) : null;
+    const offset = cents === null ? null : Math.abs(cents) > 6 && Math.abs(cents) < 7 ? cents.toFixed(1) : Math.round(cents);
+    button.setAttribute("aria-pressed", String(i === state.activeLug));
+    button.setAttribute("aria-label", `Lug ${i + 1}, ${lug.hz ? lug.hz.toFixed(1) + " Hz" : "not measured"}${lug.complete ? ", captured" : ""}${cents === null ? "" : ", " + offset + " cents from average"}`);
+    button.dataset.tone = cents === null ? "neutral" : Math.abs(cents) <= 6 ? "good" : "adjust";
+    button.innerHTML = `<span>${i + 1}</span>${cents === null ? "" : "<small>" + (cents >= 0 ? "+" : "") + offset + "c</small>"}`;
+  });
+  drawMeter();
 }
 
 function updateHeadUI() {
-  const batter = state.heads.batter.hz;
-  const resonant = state.heads.resonant.hz;
-  if (batter && resonant) {
-    el.headRatioReadout.textContent = `${(resonant / batter).toFixed(2)} ratio`;
-  } else {
-    const active = state.heads[state.headSide];
-    el.headRatioReadout.textContent = active.hz ? `${active.hz.toFixed(1)} Hz` : "-- ratio";
+  for (const side of ["batter", "resonant"]) {
+    const head = state.heads[side];
+    document.querySelector("#" + side + "Progress").textContent = head.complete ? "Captured" : `${head.takes.length}/${state.requiredTakes}`;
+    document.querySelector("#" + (side === "batter" ? "batterValue" : "resonantValue")).innerHTML = `${head.hz ? head.hz.toFixed(1) : "--"} <small>Hz</small>`;
   }
+  el.headButtons.forEach(button => {
+    const active = button.dataset.head === state.headSide;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  updateReadouts();
 }
 
 function setMode(mode) {
+  const changed = state.mode !== mode;
+  if (!changed && state.lugArmed) return;
   state.mode = mode;
-  if (mode !== "lugs") state.lugArmed = false;
-  el.segments.forEach((segment) => {
+  state.lugArmed = false;
+  document.querySelector(".app-shell").dataset.mode = mode;
+  document.querySelector("#tuningView").setAttribute("aria-labelledby", "tab-" + mode);
+  document.querySelector("#lugControls").hidden = mode !== "lugs";
+  document.querySelector("#headControls").hidden = mode !== "heads";
+  document.querySelector("#lugSetup").hidden = mode !== "lugs";
+  document.querySelector("#headSetup").hidden = mode !== "heads";
+  document.querySelector("#targetSettings").hidden = mode !== "pitch";
+  el.lugButtons.hidden = mode !== "lugs";
+  el.segments.forEach(segment => {
     const active = segment.dataset.mode === mode;
     segment.classList.toggle("active", active);
     segment.setAttribute("aria-selected", String(active));
+    segment.tabIndex = active ? 0 : -1;
   });
-  el.modeLabel.textContent =
-    mode === "lugs" ? "Lug tuning" : mode === "heads" ? "Head matching" : "Pitch tuning";
+  if (changed) resetTakes();
+  if (mode === "heads") restoreHeadReading();
+  updateCaptureSettings();
+  updateReadouts();
   updateLugUI();
+  showReadyFeedback();
   drawMeter();
 }
 
 function setStatus(signal, analysis) {
   el.signalReadout.textContent = signal;
   el.analysisStatus.textContent = analysis;
+  if (signal === "Rejected") {
+    const hints = {
+      "Clipped hit": "Tap more gently or move the phone farther away.",
+      "Weak hit": "Move the phone closer and use a consistent tap.",
+      "Short hit": "Let the head ring after the tap.",
+      "No stable pitch": "Mute nearby drums and try a lighter, isolated tap.",
+      "Low confidence": "Try another tap in a quieter room.",
+    };
+    setFeedback("Tap not used", hints[analysis] || "Try a lighter, isolated tap and let it ring.", "warning");
+    el.readingState.textContent = state.currentHz ? "Previous reading · tap not used" : "No accepted reading";
+  } else if (signal === "Hit detected" && (state.mode !== "lugs" || state.lugArmed)) {
+    setFeedback("Measuring the decay", state.mode === "lugs" ? `Lug ${state.activeLug + 1} · let the head ring.` : "Let the head ring before the next tap.");
+  }
+}
+
+function setFeedback(title, detail, tone = "neutral") {
+  el.feedbackTitle.textContent = title;
+  el.feedbackDetail.textContent = detail;
+  el.feedback.dataset.tone = tone;
+  if (!state.running && !state.currentHz) {
+    el.readingState.textContent = tone === "error" ? "Microphone unavailable"
+      : state.opening ? "Waiting for permission" : "Ready to listen";
+  }
+}
+
+function showReadyFeedback() {
+  if (state.mode === "lugs") {
+    setFeedback(state.lugArmed ? `Tap beside lug ${state.activeLug + 1}` : "Match the lugs",
+      state.lugArmed ? `${state.requiredTakes} consistent taps. Lightly mute the center.` : "Select a lug, then capture taps beside that tension rod.");
+  } else if (state.mode === "heads") {
+    setFeedback(state.running ? `Tap the ${state.headSide} head` : "Compare both heads",
+      state.running ? "Mute the opposite head and let each tap decay." : "Start the mic, then measure each head separately.");
+  } else {
+    setFeedback(state.running ? "Listening for your drum" : "Ready when you are",
+      state.running ? "Tap the center and let it ring." : "Start the mic, then tap the center of the head.");
+  }
+}
+
+function showMeasurementFeedback(stats) {
+  if (state.mode === "lugs") {
+    const complete = state.lugs.every(lug => lug.complete);
+    const current = state.lugs[state.measuredLug];
+    if (complete) {
+      const average = referenceHz("lugs");
+      const spread = Math.max(...state.lugs.map(lug => Math.abs(centsBetween(lug.hz, average))));
+      setFeedback(spread <= 6 ? "Lugs are matched" : "Round captured",
+        spread <= 6 ? "All lugs are within 6 cents of their average." : "Select a lug to inspect and recapture after adjusting.", spread <= 6 ? "good" : "warning");
+    } else if (current.complete) {
+      setFeedback(`Lug ${state.measuredLug + 1} captured`, `Next: lug ${state.activeLug + 1}. Tap beside that tension rod.`, "good");
+    } else {
+      setFeedback(`Lug ${state.measuredLug + 1} · ${current.takes.length} of ${state.requiredTakes} taps`,
+        stats.spreadCents > 22 ? "Taps vary. Keep the tap position and strength consistent."
+          : stats.confidence < .64 ? "Signal is uncertain. Try a quieter room and consistent taps." : "Keep tapping at the same position.");
+    }
+    return;
+  }
+  if (state.takes.length < state.requiredTakes || stats.spreadCents > 22 || stats.confidence < .64) {
+    setFeedback("Building a reading", stats.spreadCents > 22 ? "Taps vary. Keep the tap position and strength consistent." : "Keep tapping at the same position for a steadier reading.");
+    return;
+  }
+  if (state.mode === "heads") {
+    setFeedback(`${state.headSide === "batter" ? "Batter" : "Resonant"} captured`,
+      headRatio() ? "Both head readings are ready to compare." : "Select the other head to complete the comparison.", "good");
+    return;
+  }
+  const cents = state.currentCents;
+  setFeedback(Math.abs(cents) <= 6 ? "On target" : cents < 0 ? "Below target" : "Above target",
+    Math.abs(cents) <= 6 ? "Within 6 cents of your selected pitch."
+      : cents < 0 ? "Increase tension evenly, then tap again." : "Reduce tension evenly, then tap again.",
+    Math.abs(cents) <= 6 ? "good" : "warning");
+}
+
+function referenceHz(mode = state.mode) {
+  if (mode !== "lugs") return state.targetHz;
+  const values = state.lugs.filter(lug => lug.complete).map(lug => lug.hz);
+  return values.length >= 2 ? values.reduce((a, b) => a + b, 0) / values.length : null;
+}
+
+function restoreHeadReading() {
+  const head = state.heads[state.headSide];
+  state.takes = [...head.takes];
+  state.currentHz = head.hz;
+  state.confidence = head.confidence;
+  updateReadouts();
+  updateTakeUI();
+}
+
+function clearMeasurements() {
+  state.lugs = createLugs(state.lugs.length);
+  state.heads = { batter: createHeadState(), resonant: createHeadState() };
+  state.activeLug = getLugSequence(state.lugs.length, state.lugPattern)[0];
+  state.lugArmed = false;
+  resetTakes();
+  updateLugUI();
+  updateHeadUI();
+}
+
+function updateCaptureSettings() {
+  el.rangeInput.disabled = !el.targetFilter.checked || state.mode !== "pitch";
+  el.targetFilter.disabled = state.mode !== "pitch";
+  document.querySelector("#rangeValue").textContent = state.searchFactor.toFixed(1) + "x";
+  document.querySelector("#sensitivityValue").textContent = state.sensitivity.toFixed(3);
 }
 
 function pushHistory(hz, cents, confidence = 0) {
   state.history.unshift({
+    label: state.mode === "lugs" ? `Lug ${state.measuredLug + 1}` : state.mode === "heads" ? state.headSide : "Pitch",
     hz,
     cents,
     confidence,
@@ -1166,9 +1569,10 @@ function renderHistory() {
   el.historyList.replaceChildren();
   state.history.forEach((item) => {
     const chip = document.createElement("span");
-    const abs = Math.abs(item.cents);
-    chip.className = `history-chip ${abs <= 5 ? "good" : abs <= 18 ? "warn" : "bad"}`;
-    chip.textContent = `${item.hz.toFixed(1)} Hz  ${item.cents >= 0 ? "+" : ""}${Math.round(item.cents)}c  ${Math.round((item.confidence || 0) * 100)}%`;
+    const abs = item.cents === null ? null : Math.abs(item.cents);
+    chip.className = `history-chip ${abs === null ? "" : abs <= 6 ? "good" : abs <= 22 ? "warn" : "bad"}`;
+    const offset = item.cents === null ? "" : ` · ${item.cents >= 0 ? "+" : ""}${Math.round(item.cents)}c`;
+    chip.textContent = `${item.label} · ${item.hz.toFixed(1)} Hz${offset}`;
     el.historyList.append(chip);
   });
 }
@@ -1180,214 +1584,38 @@ function drawAll() {
 }
 
 function drawMeter() {
-  const canvas = el.meterCanvas;
   const ctx = meterCtx;
-  const width = canvas.width;
-  const height = canvas.height;
+  const width = el.meterCanvas.width;
   const center = width / 2;
-  const radius = width * 0.36;
-  ctx.clearRect(0, 0, width, height);
+  const radius = width * 0.39;
+  ctx.clearRect(0, 0, width, width);
+  if (state.mode === "pitch") return;
 
-  const shellGradient = ctx.createRadialGradient(center, center, width * 0.1, center, center, width * 0.46);
-  shellGradient.addColorStop(0, "#1d1d22");
-  shellGradient.addColorStop(0.56, colors.surface);
-  shellGradient.addColorStop(1, colors.bgBase);
-  ctx.fillStyle = shellGradient;
-  ctx.beginPath();
-  ctx.arc(center, center, width * 0.46, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
-  ctx.lineWidth = width * 0.055;
+  const shell = ctx.createRadialGradient(center, center, 40, center, center, radius);
+  shell.addColorStop(0, "#1e2225");
+  shell.addColorStop(1, "#131517");
+  ctx.fillStyle = shell;
   ctx.beginPath();
   ctx.arc(center, center, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#454b50";
+  ctx.lineWidth = 2;
   ctx.stroke();
-
-  const hasReading = Number.isFinite(state.currentHz) && Number.isFinite(state.currentCents);
-  const cents = hasReading ? clamp(state.currentCents, -50, 50) : 0;
-  const startAngle = -Math.PI * 1.17;
-  const centerAngle = -Math.PI / 2;
-  const endAngle = Math.PI * 0.17;
-  const angle = map(cents, -50, 50, startAngle, endAngle);
-
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.16)";
-  ctx.lineWidth = width * 0.065;
-  ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.arc(center, center, radius, startAngle, endAngle, false);
+  ctx.arc(center, center, radius + 12, 0, Math.PI * 2);
+  ctx.strokeStyle = "#292e32";
   ctx.stroke();
-
-  if (hasReading) {
-    ctx.strokeStyle = colorForCents(cents);
-    ctx.beginPath();
-    if (angle >= centerAngle) {
-      ctx.arc(center, center, radius, centerAngle, angle, false);
-    } else {
-      ctx.arc(center, center, radius, angle, centerAngle, false);
-    }
-    ctx.stroke();
-  }
-  ctx.lineCap = "butt";
-
-  for (let i = -50; i <= 50; i += 10) {
-    const tickAngle = map(i, -50, 50, startAngle, endAngle);
-    const inner = radius - width * (i % 25 === 0 ? 0.06 : 0.035);
-    const outer = radius + width * 0.035;
-    drawRadialLine(ctx, center, center, inner, outer, tickAngle, i === 0 ? colors.text : colors.secondary, i === 0 ? 5 : 3);
-  }
-
-  const needleColor = hasReading ? colorForCents(cents) : "rgba(242, 242, 243, 0.48)";
-  drawNeedle(ctx, center, center, radius * 0.95, angle, needleColor);
 
   if (state.mode === "lugs") {
-    drawLugs(ctx, center, center, radius * 1.03);
-  } else if (state.mode === "heads") {
-    drawHeadMatcher(ctx, center, center, radius);
-  } else {
-    drawPitchLabels(ctx, center, center, radius * 1.18, startAngle, centerAngle, endAngle, hasReading);
+    return;
   }
-
-  drawInputRing(ctx, center, center, width * 0.47);
-}
-
-function drawPitchLabels(ctx, x, y, radius, startAngle, centerAngle, endAngle, hasReading) {
-  ctx.save();
-  ctx.font = "700 15px Geist, system-ui, sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-
-  [
-    { angle: startAngle, label: "FLAT" },
-    { angle: centerAngle, label: "TARGET" },
-    { angle: endAngle, label: "SHARP" },
-  ].forEach((item) => {
-    const lx = x + Math.cos(item.angle) * radius;
-    const ly = y + Math.sin(item.angle) * radius;
-    ctx.fillStyle = item.label === "TARGET" && hasReading ? colors.text : colors.secondary;
-    ctx.fillText(item.label, lx, ly);
-  });
-
-  ctx.restore();
-}
-
-function drawLugs(ctx, x, y, radius) {
-  const readings = state.lugs.map((lug) => lug.hz).filter((value) => Number.isFinite(value));
-  const average = readings.length ? readings.reduce((sum, value) => sum + value, 0) / readings.length : state.targetHz;
-  const lugPoints = [];
-
-  for (let i = 0; i < state.lugs.length; i += 1) {
-    const angle = -Math.PI / 2 + (Math.PI * 2 * i) / state.lugs.length;
-    lugPoints[i] = {
-      x: x + Math.cos(angle) * radius,
-      y: y + Math.sin(angle) * radius,
-    };
-  }
-
-  if (state.lugPattern === "star") {
-    const sequence = getLugSequence(state.lugs.length, state.lugPattern);
-    ctx.strokeStyle = "rgba(249, 115, 22, 0.32)";
+  if (state.mode === "heads") {
+    ctx.strokeStyle = state.heads[state.headSide].complete ? colors.success : state.heads[state.headSide].hz ? colors.accent : "#454c51";
     ctx.lineWidth = 4;
-    ctx.setLineDash([8, 13]);
     ctx.beginPath();
-    sequence.forEach((lugIndex, position) => {
-      const point = lugPoints[lugIndex];
-      if (position === 0) ctx.moveTo(point.x, point.y);
-      else ctx.lineTo(point.x, point.y);
-    });
+    ctx.arc(center, center, radius - 16, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.setLineDash([]);
   }
-
-  for (let i = 0; i < state.lugs.length; i += 1) {
-    const lx = lugPoints[i].x;
-    const ly = lugPoints[i].y;
-    const lug = state.lugs[i];
-    const value = lug.hz;
-    const offset = Number.isFinite(value) ? centsBetween(value, average) : null;
-    const active = i === state.activeLug;
-    const armed = active && state.lugArmed;
-
-    ctx.fillStyle = offset === null ? colors.elevated : colorForCents(offset);
-    ctx.strokeStyle = armed ? colors.accent : active ? colors.accentSoft : colors.border;
-    ctx.lineWidth = armed ? 9 : active ? 7 : 3;
-    ctx.beginPath();
-    ctx.arc(lx, ly, 38, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = offset === null ? colors.text : colors.bgBase;
-    ctx.font = "700 22px Geist, system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    const label =
-      offset === null ? String(i + 1) : `${offset >= 0 ? "+" : ""}${Math.round(offset)}`;
-    ctx.fillText(label, lx, ly);
-
-    if (lug.takes.length) {
-      ctx.fillStyle = offset === null ? colors.secondary : colors.bgBase;
-      ctx.font = "700 13px Geist, system-ui, sans-serif";
-      ctx.fillText(`${lug.takes.length}/${state.requiredTakes}`, lx, ly + 22);
-    }
-  }
-}
-
-function drawHeadMatcher(ctx, x, y, radius) {
-  const batter = state.heads.batter.hz || (state.headSide === "batter" ? state.currentHz : null) || state.targetHz;
-  const resonant = state.heads.resonant.hz || (state.headSide === "resonant" ? state.currentHz : null) || state.targetHz;
-  const leftX = x - radius * 0.42;
-  const rightX = x + radius * 0.42;
-
-  drawMiniDial(ctx, leftX, y + radius * 0.52, batter, "Batter");
-  drawMiniDial(ctx, rightX, y + radius * 0.52, resonant, "Reso");
-}
-
-function drawMiniDial(ctx, x, y, hz, label) {
-  ctx.strokeStyle = colors.accent;
-  ctx.lineWidth = 7;
-  ctx.beginPath();
-  ctx.arc(x, y, 58, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.fillStyle = colors.text;
-  ctx.font = "700 24px Geist, system-ui, sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText(hz.toFixed(1), x, y - 4);
-  ctx.fillStyle = colors.secondary;
-  ctx.font = "600 15px Geist, system-ui, sans-serif";
-  ctx.fillText(label, x, y + 25);
-}
-
-function drawInputRing(ctx, x, y, radius) {
-  const level = clamp(state.signalRms * 8, 0, 1);
-  ctx.strokeStyle = `rgba(249, 115, 22, ${0.12 + level * 0.52})`;
-  ctx.lineWidth = 5 + level * 10;
-  ctx.beginPath();
-  ctx.arc(x, y, radius, 0, Math.PI * 2);
-  ctx.stroke();
-}
-
-function drawNeedle(ctx, x, y, length, angle, color) {
-  const readoutClearance = 92;
-  const baseY = -Math.min(readoutClearance, length - 34);
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(angle);
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.moveTo(-10, baseY);
-  ctx.lineTo(10, baseY);
-  ctx.lineTo(0, -length);
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
-}
-
-function drawRadialLine(ctx, x, y, inner, outer, angle, color, width) {
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width;
-  ctx.beginPath();
-  ctx.moveTo(x + Math.cos(angle) * inner, y + Math.sin(angle) * inner);
-  ctx.lineTo(x + Math.cos(angle) * outer, y + Math.sin(angle) * outer);
-  ctx.stroke();
 }
 
 function drawWaveform() {
@@ -1495,19 +1723,8 @@ function centsBetween(value, target) {
   return 1200 * Math.log2(value / target);
 }
 
-function colorForCents(cents) {
-  const abs = Math.abs(cents);
-  if (abs <= 6) return colors.success;
-  if (abs <= 22) return colors.warning;
-  return colors.error;
-}
-
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
-}
-
-function map(value, inMin, inMax, outMin, outMax) {
-  return outMin + ((value - inMin) * (outMax - outMin)) / (inMax - inMin);
 }
 
 function nextPowerOfTwo(value) {
