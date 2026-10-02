@@ -51,7 +51,7 @@ room reflections, or phone input processing.
   with an original drumhead mark and a quieter, compact wordmark.
 - Octave disagreement could make the same unfiltered head or lug signal change
   frequency when its preset changed. Resolution now uses measured candidates;
-  only explicit pitch-mode filtering uses the target as an octave preference.
+  explicit pitch filtering locks to a stable measured reading, not a preset.
 - The audio context now follows the microphone's reported sample rate when
   supported, avoiding unnecessary resampling. Missing or unsupported metadata
   retains the browser default.
@@ -67,6 +67,7 @@ room reflections, or phone input processing.
 | Real-time pipeline | Generated audio delivered through a MediaStream into the shipped capture and analysis path |
 | Primary flows | Pitch below/on/above target; one capture per generated tap; reset and preset changes; mic stop/restart |
 | Lug capture | 6-lug star round, automatic progression, completion, recapture, low-confidence gate; 6/8/10 sequence coverage |
+| Tuning references | Fixed first-lug reference, measured-pitch filter lock, and local kit save/load exercised with synthetic taps |
 | Heads | Independent 150/225 Hz captures produce approximately 1.50; partial head capture withholds ratio; complete/variable-tap gates tested; reset clears both |
 | Error states | Clipping rejection, permission denial/retry, cancellation with late permission resolution, unavailable storage; simulated input disconnection and background pause in Chromium |
 | Accessibility | Keyboard tab navigation, native dialog focus behavior, named lug buttons; automated axe WCAG A/AA scans of the three main views found no violations |

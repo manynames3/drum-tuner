@@ -44,8 +44,8 @@
 
 **Status:** Accepted
 
-**Context:** The app needs to remember practical local preferences such as target frequency, sensitivity, hit count, lug count, lug order, and selected head side. There is no current requirement for cross-device accounts.
+**Context:** The app needs to remember practical local preferences and personal drum/kit targets. There is no current requirement for cross-device accounts.
 
-**Decision:** Use `localStorage` for lightweight local settings persistence.
+**Decision:** Use `localStorage` for settings and named kit tunings. Treat saved lug and head frequencies as references, never as fresh measurements.
 
 **Consequences:** The app remains backend-free and private by default. Settings are device-local and can be cleared by the browser; cloud sync would require a later architecture change.

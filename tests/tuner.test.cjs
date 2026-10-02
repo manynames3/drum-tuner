@@ -14,7 +14,8 @@ const context = vm.createContext({
 vm.runInContext(source.replace("\ninit();\n", "\n") + `
 globalThis.api = { analyzeDrumHit, detectPitchYin, detectModalPeakGoertzel,
   state, createLugs, captureActiveLugTake, getLugSequence, centsBetween,
-  createHeadState, captureHeadTake, headRatio, el, fusePitchEstimates, createInputAudioContext };
+  createHeadState, captureHeadTake, headRatio, el, fusePitchEstimates, createInputAudioContext,
+  referenceHz, getSearchRange, normalizeSavedDrum };
 `, context);
 const { api } = context;
 
@@ -73,6 +74,21 @@ test("low confidence cannot complete a lug", () => {
   assert.equal(state.lugs[0].complete, false);
 });
 
+test("first stable lug locks the reference while later captures do not move it", () => {
+  const state = api.state;
+  state.lugs = api.createLugs(6);
+  state.lugReference = null;
+  state.savedLugTargetHz = null;
+  state.activeLug = 0;
+  state.lugPattern = "clockwise";
+  state.lugArmed = true;
+  for (let i = 0; i < 3; i++) api.captureActiveLugTake({ hz: 180, confidence: .9 });
+  assert.equal(api.referenceHz("lugs"), 180);
+  for (let i = 0; i < 3; i++) api.captureActiveLugTake({ hz: 190, confidence: .9 });
+  assert.equal(api.referenceHz("lugs"), 180);
+  assert.equal(state.lugReference.index, 0);
+});
+
 test("every supported lug order visits each lug once", () => {
   for (const count of [6, 8, 10]) for (const pattern of ["clockwise", "star"]) {
     const sequence = Array.from(api.getLugSequence(count, pattern));
@@ -113,12 +129,27 @@ test("unfiltered octave resolution uses the measured mode independently of prese
   api.el.targetFilter.checked = false;
 });
 
-test("explicit pitch focus chooses a measured candidate near the target", () => {
+test("pitch focus follows only a measured lock, never a preset target", () => {
   api.state.mode = "pitch";
-  api.state.targetHz = 110;
+  api.state.targetHz = 220;
   api.el.targetFilter.checked = true;
+  api.state.pitchLockHz = null;
+  assert.equal(api.fusePitchEstimates({ hz: 110, confidence: .9 }, { hz: 220, confidence: .9 }).hz, 220);
+  api.state.pitchLockHz = 110;
   assert.equal(api.fusePitchEstimates({ hz: 110, confidence: .9 }, { hz: 220, confidence: .9 }).hz, 110);
+  const range = api.getSearchRange();
+  assert.ok(range.min < 110 && range.max > 110);
+  assert.ok(range.max < 220);
   api.el.targetFilter.checked = false;
+  api.state.pitchLockHz = null;
+});
+
+test("saved drum data is validated before use", () => {
+  assert.equal(api.normalizeSavedDrum({ name: "Tom", targetHz: 999 }), null);
+  const drum = api.normalizeSavedDrum({ name: "Tom", targetHz: 123.5, lugHz: 180, batterHz: 150, resonantHz: 225, headGoal: 1.5 });
+  assert.equal(drum.lugHz, 180);
+  assert.equal(drum.headGoal, 1.5);
+  assert.equal(drum.resonantHz, 225);
 });
 
 test("audio context follows a reported input rate and uses defaults when absent", () => {

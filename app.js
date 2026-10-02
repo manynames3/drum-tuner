@@ -54,6 +54,8 @@ const el = {
   targetInput: document.querySelector("#targetInput"),
   rangeInput: document.querySelector("#rangeInput"),
   targetFilter: document.querySelector("#targetFilter"),
+  filterReference: document.querySelector("#filterReference"),
+  measurementGuide: document.querySelector("#measurementGuide"),
   sensitivityInput: document.querySelector("#sensitivityInput"),
   takesSelect: document.querySelector("#takesSelect"),
   resetTakesButton: document.querySelector("#resetTakesButton"),
@@ -62,7 +64,19 @@ const el = {
   captureLugButton: document.querySelector("#captureLugButton"),
   clearLugsButton: document.querySelector("#clearLugsButton"),
   lugAverage: document.querySelector("#lugAverage"),
+  lugReferenceNote: document.querySelector("#lugReferenceNote"),
+  setLugReferenceButton: document.querySelector("#setLugReferenceButton"),
   headButtons: document.querySelectorAll("[data-head]"),
+  soundGoalSelect: document.querySelector("#soundGoalSelect"),
+  headRatioInput: document.querySelector("#headRatioInput"),
+  customGoalField: document.querySelector("#customGoalField"),
+  goalReadout: document.querySelector("#goalReadout"),
+  kitNameInput: document.querySelector("#kitNameInput"),
+  drumNameInput: document.querySelector("#drumNameInput"),
+  saveDrumButton: document.querySelector("#saveDrumButton"),
+  kitStatus: document.querySelector("#kitStatus"),
+  kitDrumList: document.querySelector("#kitDrumList"),
+  kitCount: document.querySelector("#kitCount"),
   resetHeadsButton: document.querySelector("#resetHeadsButton"),
   analysisStatus: document.querySelector("#analysisStatus"),
   historyList: document.querySelector("#historyList"),
@@ -92,6 +106,7 @@ const state = {
   targetHz: 123.5,
   mode: "pitch",
   searchFactor: 1.4,
+  pitchLockHz: null,
   sensitivity: 0.025,
   signalRms: 0,
   signalPeak: 0,
@@ -109,11 +124,17 @@ const state = {
   activeLug: 0,
   lugPattern: "clockwise",
   lugArmed: false,
+  lugReference: null,
+  savedLugTargetHz: null,
   heads: {
     batter: createHeadState(),
     resonant: createHeadState(),
   },
   headSide: "batter",
+  headGoal: 1.2,
+  headGoalCustom: false,
+  savedHeadTargets: { batter: null, resonant: null },
+  kits: [],
   history: [],
 };
 
@@ -157,6 +178,7 @@ function getLugSequence(count, pattern) {
 
 function init() {
   loadSettings();
+  loadKits();
   updateSecureState();
   bindControls();
   drawAll();
@@ -165,6 +187,8 @@ function init() {
   updateLugPatternUI();
   updateLugUI();
   updateHeadUI();
+  updateGoalUI();
+  renderKits();
   setMode("pitch");
   updateCaptureSettings();
   observeMeterLayout();
@@ -214,6 +238,7 @@ function bindControls() {
     if (!preset) return;
     if (el.presetSelect.value !== "custom") state.targetHz = preset.hz;
     el.targetInput.value = String(state.targetHz);
+    clearSavedTargets();
     clearMeasurements();
     updateTargetUI();
     persistSettings();
@@ -228,8 +253,11 @@ function bindControls() {
     }
     state.targetHz = next;
     el.presetSelect.value = "custom";
+    clearSavedTargets();
+    clearPitchLock();
     resetTakes();
     updateTargetUI();
+    updateLugUI();
     persistSettings();
   });
 
@@ -240,9 +268,18 @@ function bindControls() {
   });
 
   el.targetFilter.addEventListener("change", () => {
+    if (el.targetFilter.checked) {
+      const stats = computeTakeStats(state.takes);
+      if (state.mode !== "pitch" || state.requiredTakes < 3 || !hasStableReading(stats)) {
+        el.targetFilter.checked = false;
+      } else {
+        state.pitchLockHz = stats.hz;
+      }
+    } else {
+      state.pitchLockHz = null;
+    }
     updateCaptureSettings();
     resetTakes();
-    persistSettings();
   });
 
   el.sensitivityInput.addEventListener("input", () => {
@@ -254,6 +291,7 @@ function bindControls() {
 
   el.takesSelect.addEventListener("change", () => {
     state.requiredTakes = Number(el.takesSelect.value);
+    clearPitchLock();
     clearMeasurements();
     persistSettings();
   });
@@ -275,6 +313,8 @@ function bindControls() {
     state.lugs = createLugs(count);
     state.activeLug = getLugSequence(count, state.lugPattern)[0];
     state.lugArmed = false;
+    state.lugReference = null;
+    state.savedLugTargetHz = null;
     resetTakes();
     updateLugUI();
     persistSettings();
@@ -317,8 +357,40 @@ function bindControls() {
     state.lugs = createLugs(state.lugs.length);
     state.activeLug = getLugSequence(state.lugs.length, state.lugPattern)[0];
     state.lugArmed = false;
+    state.lugReference = null;
     resetTakes();
     updateLugUI();
+  });
+
+  el.setLugReferenceButton.addEventListener("click", () => {
+    const lug = state.lugs[state.activeLug];
+    if (!lug.complete) return;
+    state.lugReference = { index: state.activeLug, hz: lug.hz };
+    state.savedLugTargetHz = null;
+    updateLugUI();
+    updateReadouts();
+    setFeedback(`Lug ${state.activeLug + 1} is the reference`, "Other lug offsets now compare to this fixed reading.", "good");
+  });
+
+  el.soundGoalSelect.addEventListener("change", () => {
+    state.headGoalCustom = el.soundGoalSelect.value === "custom";
+    if (!state.headGoalCustom) state.headGoal = Number(el.soundGoalSelect.value);
+    updateGoalUI();
+    persistSettings();
+  });
+  el.headRatioInput.addEventListener("change", () => {
+    const value = Number(el.headRatioInput.value);
+    if (Number.isFinite(value) && value >= .6 && value <= 2) state.headGoal = value;
+    updateGoalUI();
+    persistSettings();
+  });
+  el.saveDrumButton.addEventListener("click", saveCurrentDrum);
+  el.kitDrumList.addEventListener("click", event => {
+    const button = event.target.closest("button[data-kit-action]");
+    if (!button) return;
+    const [kitIndex, drumIndex] = [Number(button.dataset.kit), Number(button.dataset.drum)];
+    if (button.dataset.kitAction === "load") loadSavedDrum(kitIndex, drumIndex);
+    if (button.dataset.kitAction === "remove") removeSavedDrum(kitIndex, drumIndex);
   });
 
   el.headButtons.forEach(button => button.addEventListener("click", () => {
@@ -351,11 +423,11 @@ function bindControls() {
     updateReadouts();
     updateTakeUI();
     updateLugUI();
-    const average = referenceHz("lugs");
-    if (lug.complete && average) {
-      const cents = centsBetween(lug.hz, average);
-      setFeedback(`Lug ${state.activeLug + 1} · ${Math.abs(cents) <= 6 ? "matched" : cents < 0 ? "below average" : "above average"}`,
-        Math.abs(cents) <= 6 ? "Within 6 cents of the lug average."
+    const reference = referenceHz("lugs");
+    if (lug.complete && reference) {
+      const cents = centsBetween(lug.hz, reference);
+      setFeedback(`Lug ${state.activeLug + 1} · ${Math.abs(cents) <= 6 ? "matched" : cents < 0 ? "below reference" : "above reference"}`,
+        Math.abs(cents) <= 6 ? "Within 6 cents of the fixed lug reference."
           : cents < 0 ? "Tighten this rod slightly, then recapture." : "Loosen this rod slightly, then recapture.",
         Math.abs(cents) <= 6 ? "good" : "warning");
     }
@@ -916,10 +988,9 @@ function fusePitchEstimates(yin, modal) {
     Math.abs(centsBetween(yin.hz / 2, modal.hz)),
   );
   if (octaveDiff <= 45) {
-    // The strongest measured mode remains independent of a preset unless the
-    // user explicitly narrows pitch detection around their selected target.
-    const targetFocused = state.mode === "pitch" && el.targetFilter.checked;
-    const chosen = targetFocused && Math.abs(centsBetween(yin.hz, state.targetHz)) < Math.abs(centsBetween(modal.hz, state.targetHz))
+    // A locked reading may disambiguate an octave; preset targets never do.
+    const targetFocused = state.mode === "pitch" && el.targetFilter.checked && state.pitchLockHz;
+    const chosen = targetFocused && Math.abs(centsBetween(yin.hz, state.pitchLockHz)) < Math.abs(centsBetween(modal.hz, state.pitchLockHz))
       ? yin : modal;
     return {
       hz: chosen.hz,
@@ -1007,6 +1078,9 @@ function captureActiveLugTake(result) {
   lug.confidence = stats.confidence;
   lug.complete = lug.takes.length >= state.requiredTakes && stats.spreadCents <= 22 && stats.confidence >= .64;
   if (lug.complete) {
+    if (!state.lugReference && !state.savedLugTargetHz) {
+      state.lugReference = { index: state.activeLug, hz: lug.hz };
+    }
     const sequence = getLugSequence(state.lugs.length, state.lugPattern);
     const at = sequence.indexOf(state.activeLug);
     const remaining = [...sequence.slice(at + 1), ...sequence.slice(0, at)].find(index => !state.lugs[index].complete);
@@ -1035,6 +1109,16 @@ function headRatio() {
     ? state.heads.resonant.hz / state.heads.batter.hz : null;
 }
 
+function hasStableReading(stats) {
+  return state.takes.length >= state.requiredTakes && stats.spreadCents <= 22 && stats.confidence >= .64;
+}
+
+function clearPitchLock() {
+  state.pitchLockHz = null;
+  el.targetFilter.checked = false;
+  updateCaptureSettings();
+}
+
 function resetTakes() {
   state.takes = [];
   state.pendingAnalysis = false;
@@ -1059,7 +1143,7 @@ function qualityLabelFor(result) {
 }
 
 function getSearchRange() {
-  if (!el.targetFilter.checked || state.mode !== "pitch") {
+  if (!el.targetFilter.checked || state.mode !== "pitch" || !state.pitchLockHz) {
     return {
       min: 35,
       max: 450,
@@ -1067,10 +1151,9 @@ function getSearchRange() {
   }
 
   const factor = state.searchFactor;
-  const preset = presets[el.presetSelect.value];
   return {
-    min: clamp(Math.max(state.targetHz / factor, preset?.min || 35), 35, 450),
-    max: clamp(Math.min(state.targetHz * factor, preset?.max || 450), 35, 450),
+    min: clamp(state.pitchLockHz / factor, 35, 450),
+    max: clamp(state.pitchLockHz * factor, 35, 450),
   };
 }
 
@@ -1241,9 +1324,6 @@ function loadSettings() {
       state.sensitivity = clamp(saved.sensitivity, 0.01, 0.18);
       el.sensitivityInput.value = String(state.sensitivity);
     }
-    if (typeof saved.targetFilter === "boolean") {
-      el.targetFilter.checked = saved.targetFilter;
-    }
     if (Number.isFinite(saved.requiredTakes)) {
       state.requiredTakes = clamp(Math.round(saved.requiredTakes), 1, 5);
       el.takesSelect.value = String(state.requiredTakes);
@@ -1259,6 +1339,10 @@ function loadSettings() {
     if (saved.headSide === "batter" || saved.headSide === "resonant") {
       state.headSide = saved.headSide;
     }
+    if (Number.isFinite(saved.headGoal) && saved.headGoal >= .6 && saved.headGoal <= 2) {
+      state.headGoal = saved.headGoal;
+    }
+    state.headGoalCustom = saved.headGoalCustom === true;
   } catch {
     // Invalid or unavailable storage must not prevent tuning.
   }
@@ -1270,11 +1354,12 @@ function persistSettings() {
     targetHz: state.targetHz,
     searchFactor: state.searchFactor,
     sensitivity: state.sensitivity,
-    targetFilter: el.targetFilter.checked,
     requiredTakes: state.requiredTakes,
     lugCount: state.lugs.length,
     lugPattern: state.lugPattern,
     headSide: state.headSide,
+    headGoal: state.headGoal,
+    headGoalCustom: state.headGoalCustom,
   };
   try {
     localStorage.setItem("drumTunerSettings", JSON.stringify(settings));
@@ -1300,12 +1385,12 @@ function updateTargetUI() {
 
 function updateReadouts() {
   const ref = referenceHz();
-  document.querySelector("#referenceLabel").textContent = state.mode === "lugs" ? "Lug average" : state.mode === "heads" ? "Resonant / batter" : "Target";
+  document.querySelector("#referenceLabel").textContent = state.mode === "lugs" ? "Lug reference" : state.mode === "heads" ? "Resonant / batter" : "Target";
   el.targetReadout.textContent = state.mode === "heads"
     ? headRatio() ? headRatio().toFixed(2) + "x" : "--"
     : ref ? ref.toFixed(1) + " Hz" : "--";
   el.modeLabel.textContent = state.mode === "lugs" ? `Lug ${(state.measuredLug ?? state.activeLug) + 1}`
-    : state.mode === "heads" ? state.headSide === "batter" ? "Batter head" : "Resonant head" : "Head pitch";
+    : state.mode === "heads" ? state.headSide === "batter" ? "Batter head" : "Resonant head" : "Whole-drum pitch";
   el.readingState.textContent = state.currentHz
     ? state.running ? "Last captured reading" : "Mic off · reading held"
     : state.running ? "Listening for a tap" : "Ready to listen";
@@ -1317,6 +1402,7 @@ function updateReadouts() {
     el.confidenceReadout.textContent = "--";
     state.currentCents = null;
     updatePitchIndicator(false);
+    updateCaptureSettings();
     return;
   }
   const note = frequencyToNote(state.currentHz);
@@ -1330,17 +1416,17 @@ function updateReadouts() {
   }
   const cents = ref && state.mode !== "heads" ? centsBetween(state.currentHz, ref) : null;
   state.currentCents = cents;
-  const pitchReady = state.mode !== "pitch" ||
-    state.takes.length >= state.requiredTakes && stats.spreadCents <= 22 && stats.confidence >= .64;
+  const pitchReady = state.mode !== "pitch" || hasStableReading(stats);
   el.frequencyReadout.textContent = pitchReady ? state.currentHz.toFixed(1) : "--";
   const offset = cents === null ? null : `${cents >= 0 ? "+" : ""}${Math.round(cents)} c`;
   el.noteReadout.textContent = state.mode === "lugs"
-    ? offset ? `${offset} vs lug average` : "Need another lug"
+    ? offset ? `${offset} vs reference` : "Capture a reference lug"
     : state.mode === "heads" ? `${note.name}${note.octave}`
     : pitchReady ? `${note.name}${note.octave} · ${state.requiredTakes === 1 ? "single hit" : `${state.requiredTakes}-tap average`}` : "Another tap needed";
   el.centsReadout.textContent = cents === null || !pitchReady ? "--" : `${cents >= 0 ? "+" : ""}${Math.round(cents)} c`;
   el.confidenceReadout.textContent = `${Math.round(state.confidence * 100)}%`;
   updatePitchIndicator(pitchReady && cents !== null);
+  updateCaptureSettings();
 }
 
 function updatePitchIndicator(ready) {
@@ -1379,7 +1465,12 @@ function updateLugUI() {
   el.captureLugButton.textContent = state.lugArmed ? "Pause capture"
     : `${state.lugs[state.activeLug].complete ? "Recapture" : "Capture"} lug ${state.activeLug + 1}`;
   el.captureLugButton.setAttribute("aria-pressed", String(state.lugArmed));
-  const average = referenceHz("lugs");
+  const reference = referenceHz("lugs");
+  el.setLugReferenceButton.disabled = !state.lugs[state.activeLug].complete;
+  el.lugReferenceNote.textContent = state.lugReference
+    ? `Locked to lug ${state.lugReference.index + 1} · ${state.lugReference.hz.toFixed(1)} Hz`
+    : state.savedLugTargetHz ? `Saved lug target · ${state.savedLugTargetHz.toFixed(1)} Hz`
+      : "First stable lug becomes the reference.";
   if (el.lugButtons.children.length !== state.lugs.length) {
     el.lugButtons.replaceChildren(...state.lugs.map((_, i) => {
       const button = document.createElement("button");
@@ -1394,10 +1485,10 @@ function updateLugUI() {
   }
   [...el.lugButtons.children].forEach((button, i) => {
     const lug = state.lugs[i];
-    const cents = lug.complete && average ? centsBetween(lug.hz, average) : null;
+    const cents = lug.complete && reference ? centsBetween(lug.hz, reference) : null;
     const offset = cents === null ? null : Math.abs(cents) > 6 && Math.abs(cents) < 7 ? cents.toFixed(1) : Math.round(cents);
     button.setAttribute("aria-pressed", String(i === state.activeLug));
-    button.setAttribute("aria-label", `Lug ${i + 1}, ${lug.hz ? lug.hz.toFixed(1) + " Hz" : "not measured"}${lug.complete ? ", captured" : ""}${cents === null ? "" : ", " + offset + " cents from average"}`);
+    button.setAttribute("aria-label", `Lug ${i + 1}, ${lug.hz ? lug.hz.toFixed(1) + " Hz" : "not measured"}${lug.complete ? ", captured" : ""}${cents === null ? "" : ", " + offset + " cents from fixed reference"}`);
     button.dataset.tone = cents === null ? "neutral" : Math.abs(cents) <= 6 ? "good" : "adjust";
     button.innerHTML = `<span>${i + 1}</span>${cents === null ? "" : "<small>" + (cents >= 0 ? "+" : "") + offset + "c</small>"}`;
   });
@@ -1416,12 +1507,27 @@ function updateHeadUI() {
     button.setAttribute("aria-pressed", String(active));
   });
   updateReadouts();
+  updateGoalUI();
+}
+
+function updateGoalUI() {
+  const preset = [1, 1.2, 1.5].find(value => Math.abs(value - state.headGoal) < .001);
+  el.soundGoalSelect.value = !state.headGoalCustom && preset ? String(preset) : "custom";
+  el.customGoalField.hidden = el.soundGoalSelect.value !== "custom";
+  el.headRatioInput.value = state.headGoal.toFixed(2);
+  const actual = headRatio();
+  const saved = state.savedHeadTargets.batter || state.savedHeadTargets.resonant
+    ? ` Saved: batter ${state.savedHeadTargets.batter?.toFixed(1) || "--"} Hz, resonant ${state.savedHeadTargets.resonant?.toFixed(1) || "--"} Hz.` : "";
+  el.goalReadout.textContent = (actual
+    ? `Measured ${actual.toFixed(2)}x · goal ${state.headGoal.toFixed(2)}x (${actual > state.headGoal + .02 ? "above" : actual < state.headGoal - .02 ? "below" : "close"}). Adjust by ear.`
+    : `Starting point: ${state.headGoal.toFixed(2)}x. Adjust by ear.`) + saved;
 }
 
 function setMode(mode) {
   const changed = state.mode !== mode;
   if (!changed && state.lugArmed) return;
   state.mode = mode;
+  if (changed) clearPitchLock();
   state.lugArmed = false;
   document.querySelector(".app-shell").dataset.mode = mode;
   document.querySelector("#tuningView").setAttribute("aria-labelledby", "tab-" + mode);
@@ -1429,6 +1535,10 @@ function setMode(mode) {
   document.querySelector("#headControls").hidden = mode !== "heads";
   document.querySelector("#lugSetup").hidden = mode !== "lugs";
   document.querySelector("#headSetup").hidden = mode !== "heads";
+  document.querySelector("#headGoal").hidden = mode !== "heads";
+  el.measurementGuide.textContent = mode === "lugs" ? "Mute the center · tap beside each rod"
+    : mode === "heads" ? "Mute the opposite head · tap the selected head's center"
+      : "Both heads free · tap near the center";
   document.querySelector("#targetSettings").hidden = mode !== "pitch";
   el.lugButtons.hidden = mode !== "lugs";
   el.segments.forEach(segment => {
@@ -1492,10 +1602,10 @@ function showMeasurementFeedback(stats) {
     const complete = state.lugs.every(lug => lug.complete);
     const current = state.lugs[state.measuredLug];
     if (complete) {
-      const average = referenceHz("lugs");
-      const spread = Math.max(...state.lugs.map(lug => Math.abs(centsBetween(lug.hz, average))));
+      const reference = referenceHz("lugs");
+      const spread = Math.max(...state.lugs.map(lug => Math.abs(centsBetween(lug.hz, reference))));
       setFeedback(spread <= 6 ? "Lugs are matched" : "Round captured",
-        spread <= 6 ? "All lugs are within 6 cents of their average." : "Select a lug to inspect and recapture after adjusting.", spread <= 6 ? "good" : "warning");
+        spread <= 6 ? "All lugs are within 6 cents of the fixed reference." : "Select a lug to inspect and recapture after adjusting.", spread <= 6 ? "good" : "warning");
     } else if (current.complete) {
       setFeedback(`Lug ${state.measuredLug + 1} captured`, `Next: lug ${state.activeLug + 1}. Tap beside that tension rod.`, "good");
     } else {
@@ -1523,8 +1633,7 @@ function showMeasurementFeedback(stats) {
 
 function referenceHz(mode = state.mode) {
   if (mode !== "lugs") return state.targetHz;
-  const values = state.lugs.filter(lug => lug.complete).map(lug => lug.hz);
-  return values.length >= 2 ? values.reduce((a, b) => a + b, 0) / values.length : null;
+  return state.lugReference?.hz || state.savedLugTargetHz;
 }
 
 function restoreHeadReading() {
@@ -1537,7 +1646,9 @@ function restoreHeadReading() {
 }
 
 function clearMeasurements() {
+  clearPitchLock();
   state.lugs = createLugs(state.lugs.length);
+  state.lugReference = null;
   state.heads = { batter: createHeadState(), resonant: createHeadState() };
   state.activeLug = getLugSequence(state.lugs.length, state.lugPattern)[0];
   state.lugArmed = false;
@@ -1546,9 +1657,174 @@ function clearMeasurements() {
   updateHeadUI();
 }
 
+function clearSavedTargets() {
+  state.savedLugTargetHz = null;
+  state.savedHeadTargets = { batter: null, resonant: null };
+  updateGoalUI();
+}
+
+function validFrequency(value) {
+  return Number.isFinite(value) && value >= 35 && value <= 450 ? value : null;
+}
+
+function normalizeSavedDrum(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw) ||
+      typeof raw.name !== "string" || !raw.name.trim() || !validFrequency(raw.targetHz)) return null;
+  return {
+    name: raw.name.trim().slice(0, 40),
+    preset: Object.hasOwn(presets, raw.preset) ? raw.preset : "custom",
+    targetHz: raw.targetHz,
+    lugCount: [6, 8, 10].includes(raw.lugCount) ? raw.lugCount : 8,
+    lugHz: validFrequency(raw.lugHz),
+    batterHz: validFrequency(raw.batterHz),
+    resonantHz: validFrequency(raw.resonantHz),
+    headGoal: Number.isFinite(raw.headGoal) && raw.headGoal >= .6 && raw.headGoal <= 2 ? raw.headGoal : 1.2,
+  };
+}
+
+function loadKits() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("drumTunerKits") || "null");
+    if (!Array.isArray(saved)) return;
+    state.kits = saved.slice(0, 12).filter(kit => kit && typeof kit.name === "string" && kit.name.trim() && Array.isArray(kit.drums))
+      .map(kit => ({ name: kit.name.trim().slice(0, 40), drums: kit.drums.slice(0, 24).map(normalizeSavedDrum).filter(Boolean) }));
+  } catch {
+    // Optional local storage cannot block the tuner.
+  }
+}
+
+function persistKits() {
+  try {
+    localStorage.setItem("drumTunerKits", JSON.stringify(state.kits));
+    return true;
+  } catch {
+    el.kitStatus.textContent = "Could not save on this device. Check browser storage settings.";
+    return false;
+  }
+}
+
+function saveCurrentDrum() {
+  const kitName = el.kitNameInput.value.trim().slice(0, 40) || "My kit";
+  const drumName = el.drumNameInput.value.trim().slice(0, 40) || (presets[el.presetSelect.value]?.name || "Drum");
+  const before = JSON.stringify(state.kits);
+  let kit = state.kits.find(item => item.name.toLowerCase() === kitName.toLowerCase());
+  if (!kit) {
+    if (state.kits.length >= 12) {
+      el.kitStatus.textContent = "Limit: 12 kits on this device.";
+      return;
+    }
+    kit = { name: kitName, drums: [] };
+    state.kits.push(kit);
+  }
+  const drum = {
+    name: drumName,
+    preset: el.presetSelect.value,
+    targetHz: state.targetHz,
+    lugCount: state.lugs.length,
+    lugHz: state.lugReference?.hz || state.savedLugTargetHz,
+    batterHz: state.heads.batter.complete ? state.heads.batter.hz : state.savedHeadTargets.batter,
+    resonantHz: state.heads.resonant.complete ? state.heads.resonant.hz : state.savedHeadTargets.resonant,
+    headGoal: state.headGoal,
+  };
+  const existing = kit.drums.findIndex(item => item.name.toLowerCase() === drumName.toLowerCase());
+  if (existing < 0 && kit.drums.length >= 24) {
+    el.kitStatus.textContent = "Limit: 24 drums per kit on this device.";
+    return;
+  }
+  if (existing >= 0) kit.drums[existing] = drum;
+  else kit.drums.push(drum);
+  el.kitNameInput.value = kit.name;
+  el.drumNameInput.value = drumName;
+  if (!persistKits()) state.kits = JSON.parse(before);
+  else el.kitStatus.textContent = `Saved ${drumName} in ${kit.name}.`;
+  renderKits();
+}
+
+function loadSavedDrum(kitIndex, drumIndex) {
+  const kit = state.kits[kitIndex];
+  const drum = kit?.drums[drumIndex];
+  if (!drum) return;
+  state.targetHz = drum.targetHz;
+  el.presetSelect.value = presets[drum.preset]?.hz === drum.targetHz ? drum.preset : "custom";
+  el.targetInput.value = String(drum.targetHz);
+  state.lugs = createLugs(drum.lugCount);
+  el.lugCountSelect.value = String(drum.lugCount);
+  state.headGoal = drum.headGoal;
+  state.headGoalCustom = ![1, 1.2, 1.5].some(value => Math.abs(value - drum.headGoal) < .001);
+  clearMeasurements();
+  state.savedLugTargetHz = drum.lugHz;
+  state.savedHeadTargets = { batter: drum.batterHz, resonant: drum.resonantHz };
+  el.kitNameInput.value = kit.name;
+  el.drumNameInput.value = drum.name;
+  updateTargetUI();
+  updateLugUI();
+  updateHeadUI();
+  persistSettings();
+  el.kitStatus.textContent = `Loaded ${drum.name}. Saved references are targets, not live readings.`;
+  document.querySelector("#kitsDetails").open = false;
+  setFeedback(`${drum.name} loaded`, "Start a new capture to compare against its saved targets.");
+}
+
+function removeSavedDrum(kitIndex, drumIndex) {
+  const kit = state.kits[kitIndex];
+  if (!kit?.drums[drumIndex] || !window.confirm(`Remove ${kit.drums[drumIndex].name} from ${kit.name}?`)) return;
+  const before = JSON.stringify(state.kits);
+  kit.drums.splice(drumIndex, 1);
+  if (!kit.drums.length) state.kits.splice(kitIndex, 1);
+  if (!persistKits()) {
+    state.kits = JSON.parse(before);
+    return;
+  }
+  renderKits();
+  el.kitStatus.textContent = "Saved drum removed.";
+}
+
+function renderKits() {
+  const count = state.kits.reduce((sum, kit) => sum + kit.drums.length, 0);
+  el.kitCount.textContent = `${count} saved`;
+  el.kitDrumList.replaceChildren();
+  if (!count) {
+    const empty = document.createElement("p");
+    empty.className = "setting-note";
+    empty.textContent = "No drums saved yet.";
+    el.kitDrumList.append(empty);
+    return;
+  }
+  state.kits.forEach((kit, kitIndex) => {
+    const heading = document.createElement("h3");
+    heading.textContent = kit.name;
+    el.kitDrumList.append(heading);
+    kit.drums.forEach((drum, drumIndex) => {
+      const row = document.createElement("div");
+      row.className = "kit-row";
+      const summary = document.createElement("span");
+      summary.textContent = `${drum.name} · ${drum.targetHz.toFixed(1)} Hz`;
+      const load = document.createElement("button");
+      load.type = "button";
+      load.className = "text-action";
+      load.textContent = "Load";
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "text-action";
+      remove.textContent = "Remove";
+      for (const [button, action] of [[load, "load"], [remove, "remove"]]) {
+        button.dataset.kitAction = action;
+        button.dataset.kit = kitIndex;
+        button.dataset.drum = drumIndex;
+      }
+      row.append(summary, load, remove);
+      el.kitDrumList.append(row);
+    });
+  });
+}
+
 function updateCaptureSettings() {
   el.rangeInput.disabled = !el.targetFilter.checked || state.mode !== "pitch";
-  el.targetFilter.disabled = state.mode !== "pitch";
+  el.targetFilter.disabled = state.mode !== "pitch" || (!state.pitchLockHz && (state.requiredTakes < 3 || !hasStableReading(computeTakeStats(state.takes))));
+  el.filterReference.textContent = state.pitchLockHz
+    ? `Locked to ${state.pitchLockHz.toFixed(1)} Hz. Turn off before changing drums.`
+    : state.requiredTakes < 3 ? "Set hits to average to 3 or more before locking a measured pitch."
+      : "Capture a stable pitch reading first. This does not use the preset target.";
   document.querySelector("#rangeValue").textContent = state.searchFactor.toFixed(1) + "x";
   document.querySelector("#sensitivityValue").textContent = state.sensitivity.toFixed(3);
 }

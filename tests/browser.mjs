@@ -177,17 +177,26 @@ try {
   assert.equal(await page.locator("#feedbackTitle").innerText(), "On target", await page.locator(".tuner-panel").innerText());
   assert.equal(await page.locator(".history-chip").count(), 3, "one capture per physical tap");
   await shot(page, "on-target");
+  await page.locator("#captureSettings summary").click();
+  assert.equal(await page.locator("#targetFilter").isEnabled(), true);
+  await page.locator("#targetFilter").check();
+  assert.match(await page.locator("#filterReference").innerText(), /Locked to 123/);
+  await page.locator("#tab-lugs").click();
+  await page.locator("#tab-pitch").click();
+  assert.equal(await page.locator("#targetFilter").isChecked(), false, "mode changes must clear the measured lock");
+  await page.locator("#captureSettings summary").click();
   await tap(page, 123.5, 3);
   assert.equal(await page.locator("#feedbackTitle").innerText(), "Tap not used");
   assert.equal(await page.locator(".history-chip").count(), 3);
   await shot(page, "clipped");
 
-  await page.locator(".settings-details summary").click();
+  await page.locator("#captureSettings summary").click();
   await page.locator("#resetTakesButton").click();
   assert.equal(await page.locator("#frequencyReadout").innerText(), "--");
   await page.locator("#takesSelect").selectOption("1");
-  await page.locator(".settings-details summary").click();
+  await page.locator("#captureSettings summary").click();
   await tap(page, 110);
+  assert.equal(await page.locator("#targetFilter").isEnabled(), false, "single-hit mode cannot establish a measured filter lock");
   assert.equal(await page.locator("#feedbackTitle").innerText(), "Below target");
   assert.equal(await page.locator("#pitchNeedle").evaluate(el => parseFloat(el.style.left)), 0, "out-of-range pitch must meet scale endpoint");
   await shot(page, "below-target");
@@ -220,6 +229,7 @@ try {
     }
   }
   assert.equal(await page.locator("#lugAverage").innerText(), "6 of 6 captured");
+  assert.match(await page.locator("#lugReferenceNote").innerText(), /Locked to lug 1/);
   const completeFeedback = await page.locator("#feedbackTitle").innerText();
   assert.ok(["Lugs are matched", "Round captured"].includes(completeFeedback));
   const lugMeasurements = await page.locator(".lug-point").evaluateAll(buttons => buttons.map(button => {
@@ -230,11 +240,15 @@ try {
   const allMatched = await page.locator('.lug-point[data-tone="good"]').count() === 6;
   assert.equal(completeFeedback === "Lugs are matched", allMatched, "completion must agree with measured lug offsets");
   await shot(page, "lugs-complete");
+  await page.locator('[data-lug="3"]').click();
+  await page.locator("#setLugReferenceButton").click();
+  assert.match(await page.locator("#lugReferenceNote").innerText(), /Locked to lug 4/);
   const historyCount = await page.locator(".history-chip").count();
   await tap(page, 200);
   assert.equal(await page.locator(".history-chip").count(), historyCount);
-  assert.equal(await page.locator("#feedbackTitle").innerText(), completeFeedback);
+  assert.match(await page.locator("#feedbackTitle").innerText(), /reference/);
   await page.locator('[data-lug="0"]').click();
+  assert.equal(await page.locator("#setLugReferenceButton").isEnabled(), true);
   await page.locator("#captureLugButton").click();
   await tap(page, 200);
   assert.equal(await page.locator("#feedbackTitle").innerText(), "Round captured");
@@ -255,12 +269,31 @@ try {
   assert.ok(Math.abs(ratio - resonant / batter) <= .006, "ratio must agree with the measured heads");
   assert.ok(Math.abs(ratio - 1.5) <= .011, `Expected approximately 1.50x, received ${ratio}`);
   await shot(page, "heads-complete");
+  await page.locator("#soundGoalSelect").selectOption("1.5");
+  assert.match(await page.locator("#goalReadout").innerText(), /goal 1\.50x/);
+  await page.locator("#soundGoalSelect").selectOption("custom");
+  await page.locator("#headRatioInput").fill("1.42");
+  await page.locator("#headRatioInput").blur();
+  assert.match(await page.locator("#goalReadout").innerText(), /goal 1\.42x/);
+  await page.locator("#kitsDetails summary").click();
+  await page.locator("#kitNameInput").fill("Stage kit");
+  await page.locator("#drumNameInput").fill("Floor tom");
+  await page.locator("#saveDrumButton").click();
+  assert.equal(await page.locator("#kitCount").innerText(), "1 saved");
+  const kitData = await page.evaluate(() => JSON.parse(localStorage.getItem("drumTunerKits")));
+  assert.equal(kitData[0].drums[0].headGoal, 1.42);
+  assert.ok(kitData[0].drums[0].lugHz > 170);
+  assert.ok(kitData[0].drums[0].resonantHz > 220);
+  await shot(page, "saved-kit");
+  await page.locator('[data-kit-action="load"]').click();
+  assert.equal(await page.locator("#targetReadout").innerText(), "--", "saved head readings must not appear as live measurements");
+  assert.match(await page.locator("#goalReadout").innerText(), /Saved: batter/);
   await page.locator("#resetHeadsButton").click();
   assert.equal(await page.locator("#frequencyReadout").innerText(), "--");
   assert.equal(await page.locator("#targetReadout").innerText(), "--");
-  await page.locator(".settings-details summary").click();
+  await page.locator("#captureSettings summary").click();
   await page.locator("#takesSelect").selectOption("3");
-  await page.locator(".settings-details summary").click();
+  await page.locator("#captureSettings summary").click();
   await page.locator('[data-head="batter"]').click();
   await tap(page, 150);
   await page.locator('[data-head="resonant"]').click();
@@ -293,6 +326,12 @@ try {
   });
   assert.equal(await page.locator("#feedbackTitle").innerText(), "Microphone paused");
   assert.equal(await page.evaluate(() => window.testStream.getTracks()[0].readyState), "ended");
+
+  await page.reload();
+  assert.equal(await page.locator("#kitCount").innerText(), "1 saved", "saved kit must survive a reload");
+  await page.locator("#kitsDetails summary").click();
+  assert.match(await page.locator("#kitDrumList").innerText(), /Stage kit/);
+  assert.equal(await page.locator("#frequencyReadout").innerText(), "--", "reload must not restore a live reading");
 
   // Denied storage must not prevent startup.
   await page.addInitScript(() => {

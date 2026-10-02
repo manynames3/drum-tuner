@@ -24,7 +24,7 @@ The app is designed for tuning taps rather than full-performance drum hits. It i
 - HTML, CSS, and vanilla JavaScript ES modules
 - Web Audio API with `AudioWorklet` for low-latency mic capture
 - Canvas for the lug/head diagrams, waveform, and spectrum; DOM/CSS for the pitch scale
-- localStorage for local preset and capture preferences
+- localStorage for local settings and named kit/drum tunings
 - Cloudflare Pages for static HTTPS deployment
 - Wrangler CLI for deployment
 
@@ -37,8 +37,10 @@ The app is designed for tuning taps rather than full-performance drum hits. It i
 - Modal-frequency scanning plus YIN-style pitch estimation with estimator agreement scoring.
 - Repeated-hit averaging with confidence and take count to reduce single-strike variance.
 - Large pitch readout with a labeled target scale and explicit next action; incomplete or unstable pitch readings are withheld.
-- Guided lug tuning with 6, 8, and 10 lug layouts plus clockwise and star-pattern sequences.
-- Batter/resonant head capture with ratio display.
+- Guided lug tuning with 6, 8, and 10 lug layouts, clockwise/star sequences, and a fixed reference from the first stable lug (or a saved target).
+- Batter/resonant head capture with an editable pitch-ratio starting point.
+- Measured-pitch filter lock, enabled only after a stable reading; preset targets cannot bias octave selection.
+- Local kit saves for drum targets, lug reference, completed head readings, and head goal.
 - Responsive tuning controls, microphone permission recovery, and keyboard-accessible mode tabs.
 - HTTPS deployment headers that allow microphone access from the app origin.
 
@@ -92,7 +94,7 @@ Good options:
 - Deploy the folder to any HTTPS static host.
 - Use a temporary HTTPS tunnel while developing.
 
-For tuning, pick a drum preset, tap near the center of the head, and let the hit decay naturally. Leave Target Filter off until the app is reading hits reliably; turn it on only when you want to narrow detection around a known target. For lug tuning, select the lug count and order, arm the active lug, then capture consistent taps near each lug.
+For whole-drum pitch, leave both heads free and tap near the center. After a stable reading, optionally lock the filter to that measured pitch; switching drums or modes clears the lock. For lug tuning, lightly mute the center and capture equal-distance taps near each rod. The first stable lug sets a fixed reference, which can be changed explicitly. For separate head readings, mute the opposite head and tap the selected head. Head-ratio goals are editable starting points, not predictions of sustain.
 
 ## Deployment
 
@@ -116,7 +118,7 @@ The Cloudflare `_headers` file sets:
 
 ## Privacy
 
-Microphone audio is processed in the browser. The app does not upload raw audio, tuning readings, or settings to a backend. Settings are stored locally with `localStorage`.
+Microphone audio is processed in the browser. The app does not upload raw audio, tuning readings, or settings to a backend. Settings and named kit tunings are stored locally with `localStorage`; they do not sync across devices and can be removed by clearing browser data.
 
 ## Limitations
 

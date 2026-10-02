@@ -18,7 +18,7 @@ flowchart LR
         browser["Container: Browser App<br/>HTML, CSS, JavaScript UI and tuning workflows"]
         worklet["Container: AudioWorklet Processor<br/>Mic frame processing, noise floor, hit capture"]
         dsp["Container: Pitch Analysis Engine<br/>Hit quality, modal scan, YIN-style estimate, averaging"]
-        storage[("Container: localStorage<br/>Local target and workflow preferences")]
+        storage[("Container: localStorage<br/>Local settings and named kit tunings")]
     end
 
     drummer -->|"Starts mic, selects mode, captures hits"| browser
@@ -27,7 +27,7 @@ flowchart LR
     mic -->|"Audio frames"| worklet
     worklet -->|"Hit sample buffers and level data"| dsp
     dsp -->|"Frequency, cents, confidence, rejection reasons"| browser
-    browser <-->|"Read/write settings"| storage
+    browser <-->|"Read/write settings and kit targets"| storage
 ```
 
 ## Runtime Flow
@@ -40,12 +40,14 @@ flowchart LR
 6. Captured hit samples are sent to the main thread for hit-quality scoring and pitch analysis.
 7. The pitch path combines modal-frequency scanning and YIN-style estimation, applies confidence thresholds, and rejects unstable readings.
 8. Accepted readings update the active workflow: pitch tuning, lug tuning, or batter/resonant head matching.
-9. User settings are persisted in `localStorage`; microphone audio is not uploaded.
+9. User settings and named kit/drum targets are persisted in `localStorage`; microphone audio is not uploaded. Loading a saved drum resets live measurements before applying its saved references.
 
 Unfiltered measurements resolve octave disagreement using the measured modal
-candidate, not the preset target. Only explicit pitch-mode target filtering
-allows the target to choose between measured octave candidates. Lug and head
-measurements remain independent of the selected preset.
+candidate, not the preset target. Pitch filtering can be locked only to a stable
+measured reading and is cleared on drum or mode changes. Lug offsets use a fixed
+reference from the first stable lug, a saved lug target, or an explicitly chosen
+completed lug; new captures do not move the reference. Head-ratio goals are
+editable starting points, not calibrated predictions of sound.
 
 ## Deployment Shape
 
